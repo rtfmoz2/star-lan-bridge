@@ -148,15 +148,50 @@ class ConfigTest(unittest.TestCase):
         self.addCleanup(os.unlink, f.name)
         return f.name
 
-    def test_example_config_loads(self):
-        stations = bridge.load_config(os.path.join(ROOT, "examples", "star-lan-bridge.conf"))
-        self.assertEqual([s.name for s in stations], ["TSP143", "TSP143-2"])
+    def lease_dir(self, leases):
+        import tempfile
+        d = tempfile.mkdtemp()
+        for name, ip in leases.items():
+            with open(os.path.join(d, f"lease-{name}"), "w") as f:
+                f.write(f"ip={ip}\nmask=24\nlease=43200\n")
+        self.addCleanup(lambda: [os.unlink(os.path.join(d, x)) for x in os.listdir(d)] and os.rmdir(d))
+        return d
+
+    def test_example_config_parses(self):
+        plist = bridge.read_printer_config(os.path.join(ROOT, "examples", "star-lan-bridge.conf"))
+        self.assertEqual([p["name"] for p in plist], ["TSP143", "TSP143-2"])
+        self.assertEqual([p["address"] for p in plist], ["auto", "dhcp"])
+        self.assertEqual(plist[1]["device"], "/dev/rfcomm1")
+        self.assertEqual(plist[1]["local"], "127.0.0.2")
+
+    def test_dhcp_printer_uses_its_lease(self):
+        path = self.write("[printer:a]\ndevice=/dev/rfcomm0\naddress=10.0.0.5\nlocal=127.0.0.1\n"
+                          "[printer:b]\ndevice=/dev/rfcomm1\naddress=dhcp\nlocal=127.0.0.2\nmac=00:11:62:2e:75:05\n")
+        stations = bridge.load_config(path, lease_dir=self.lease_dir({"b": "10.0.0.37"}))
         a, b = stations
-        self.assertEqual(a.listen_addrs(), ["192.168.1.134", "127.0.0.1"])
-        self.assertEqual(b.listen_addrs(), ["192.168.1.250", "127.0.0.2"])
-        self.assertIsNone(a.mac)
+        self.assertEqual(a.listen_addrs(), ["10.0.0.5", "127.0.0.1"])
+        self.assertEqual(b.listen_addrs(), ["10.0.0.37", "127.0.0.2"])
         self.assertEqual(b.mac, bytes.fromhex("0011622e7505"))
-        self.assertEqual(b.device, "/dev/rfcomm1")
+
+    def test_printer_without_lease_is_skipped(self):
+        path = self.write("[printer:a]\ndevice=/dev/rfcomm0\naddress=10.0.0.5\n"
+                          "[printer:b]\ndevice=/dev/rfcomm1\naddress=dhcp\n")
+        stations = bridge.load_config(path, lease_dir=self.lease_dir({}))
+        self.assertEqual([s.name for s in stations], ["a"])
+
+    def test_bad_lease_file_is_ignored(self):
+        d = self.lease_dir({"b": "not-an-ip"})
+        self.assertIsNone(bridge.read_lease("b", d))
+        self.assertIsNone(bridge.read_lease("missing", d))
+
+    def test_resolve_fixed_and_errors(self):
+        self.assertEqual(bridge.resolve_address("a", "10.1.2.3"), "10.1.2.3")
+        with self.assertRaises(OSError):
+            bridge.resolve_address("a", "not-an-ip")
+
+    def test_bad_printer_name_rejected(self):
+        with self.assertRaises(ValueError):
+            bridge.read_printer_config(self.write("[printer:../etc]\ndevice=/dev/rfcomm0\naddress=dhcp\n"))
 
     def test_duplicate_address_rejected(self):
         path = self.write("[printer:a]\ndevice=/dev/rfcomm0\naddress=10.0.0.5\n"
@@ -171,6 +206,8 @@ class ConfigTest(unittest.TestCase):
             bridge.load_config(self.write("[other]\nx=1\n"))
         with self.assertRaises(OSError):
             bridge.load_config(self.write("[printer:a]\ndevice=/dev/rfcomm0\naddress=not-an-ip\n"))
+        with self.assertRaises(ValueError):
+            bridge.read_printer_config(self.write("[printer:a]\naddress=dhcp\n"))  # no device
 
     def test_single_printer_mode_listens_everywhere(self):
         st = bridge.Station("printer", "/dev/rfcomm0")
@@ -187,6 +224,31 @@ class ProbeTest(unittest.TestCase):
         self.assertIn("etb_counter=1", probe.asb_fields(bytes.fromhex("2386020000000002000000")))
         self.assertIn("etb_counter=0", probe.asb_fields(bytes.fromhex("2386000000000000000000")))
         self.assertIn("iface=USB/BT", probe.asb_fields(bytes.fromhex("230600000000000000")))
+
+
+class PrinterLinkTest(unittest.TestCase):
+    """Reconnect bookkeeping, without a real RFCOMM device."""
+
+    def test_unreachable_sets_offline_and_backs_off(self):
+        p = bridge.Printer("/dev/rfcomm-does-not-exist")
+        p.last_asb = bytes.fromhex("2386000000000002000000")
+        t0 = bridge.time.time()
+        self.assertFalse(p.ensure_open())          # open fails: no hang, no exception
+        self.assertEqual(p.last_asb[2] & 0x08, 0x08)  # offline bit set
+        self.assertEqual(p.last_asb[7], 0x02)         # ETB counter kept
+        self.assertGreaterEqual(p.next_retry - t0, p.MIN_BACKOFF - 0.5)
+        first = p.backoff
+        p.next_retry = 0
+        p.ensure_open()
+        self.assertGreaterEqual(p.backoff, first)
+        self.assertLessEqual(p.backoff, p.MAX_BACKOFF)
+
+    def test_write_when_down_returns_false_fast(self):
+        p = bridge.Printer("/dev/rfcomm-does-not-exist")
+        t0 = bridge.time.time()
+        self.assertFalse(p.write(b"\x1b\x06\x01"))
+        self.assertFalse(p.write(b"x", wait=0.6))
+        self.assertLess(bridge.time.time() - t0, 3)
 
 
 if __name__ == "__main__":

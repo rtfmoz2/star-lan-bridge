@@ -18,14 +18,18 @@ frames back. POS apps then confirm each job and don't reprint. It's a single
 Python file with no dependencies beyond the standard library.
 
 **Several printers.** One Pi can serve more than one Bluetooth printer. Each
-gets its own IP address (a second address on the Pi's Wi-Fi works), its own
-`/dev/rfcommN` and its own CUPS queue, and appears to POS apps as a separate
-Star LAN printer:
+gets its own IP address from DHCP, its own `/dev/rfcommN` and its own CUPS
+queue, and appears to POS apps as a separate Star LAN printer:
 
 ```
-192.168.1.134  ──▶ /dev/rfcomm0 ──▶ printer 1      (CUPS: socket://127.0.0.1:9100)
-192.168.1.250  ──▶ /dev/rfcomm1 ──▶ printer 2      (CUPS: socket://127.0.0.2:9100)
+Pi's DHCP address    ──▶ /dev/rfcomm0 ──▶ printer 1   (address = auto, CUPS 127.0.0.1:9100)
+printer's own lease  ──▶ /dev/rfcomm1 ──▶ printer 2   (address = dhcp, CUPS 127.0.0.2:9100)
 ```
+
+**Web admin page.** `star-admin` serves a password-protected page at
+`http://<hostname>.local` for joining a Wi-Fi network and seeing each printer's
+address and status, so a Pi can move to a new venue without SSH. See
+[docs/ADMIN.md](docs/ADMIN.md).
 
 See [SETUP.md §7](docs/SETUP.md#7-several-printers) and
 [examples/star-lan-bridge.conf](examples/star-lan-bridge.conf).
@@ -77,6 +81,8 @@ and give each printer its own address; see [SETUP.md §7](docs/SETUP.md#7-severa
 * **[docs/SETUP.md](docs/SETUP.md)**: full setup, from flashing the Pi to
   pairing, the bridge, the optional CUPS queue, POS configuration and
   adding more printers
+* **[docs/ADMIN.md](docs/ADMIN.md)**: the web page (join Wi-Fi, see addresses),
+  how printers get DHCP addresses, and its security
 * **[docs/PROTOCOL.md](docs/PROTOCOL.md)**: Star Discovery (UDP 22222), ASB
   status frames, the 9100 and 9101 channels, and why `ESC RS a 0` is
   stripped, with each fact tagged by source
@@ -89,14 +95,19 @@ and give each printer its own address; see [SETUP.md §7](docs/SETUP.md#7-severa
 
 ```
 star_lan_bridge.py            the bridge (stdlib only)
+star_admin.py                 web admin: join Wi-Fi, show addresses, keep printer DHCP leases
+star-dhcp-alias.sh            udhcpc hook that adds a printer's leased address
 tools/star_probe.py           read-only StarIO client: discover / status / etb
 examples/star-lan-bridge.conf two-printer config (/etc/star-lan-bridge.conf)
 systemd/star-lan-bridge.service
+systemd/star-admin.service    web admin on port 80
+avahi/star-admin.service      Bonjour advert for the admin page
 systemd/rfcomm-printer.service    template; install.sh fills in MAC and channel
 scripts/install.sh            install bridge + rfcomm binding, optionally repoint CUPS
+scripts/install-admin.sh      install the web admin page
 scripts/setup-cups.sh         optional: CUPS + Star driver build + shared queue
 scripts/uninstall.sh
-tests/test_bridge.py          unit tests: python3 -m unittest discover tests
+tests/                        unit tests: python3 -m unittest discover tests
 docs/                         setup, protocol and troubleshooting docs
 ```
 
@@ -110,8 +121,12 @@ docs/                         setup, protocol and troubleshooting docs
 * **Same subnet only.** Discovery is broadcast-based, so the POS must be on the
   bridge's subnet. Turn off Wi-Fi client isolation.
 * **One IP per printer.** Star clients find printers by IP and the ports are
-  fixed, so each extra printer needs its own address on the host. On Wi-Fi
-  that means extra IPs on `wlan0` (see [SETUP.md §7](docs/SETUP.md#7-several-printers)).
+  fixed, so each extra printer needs its own DHCP lease. The Pi gets one per
+  printer by sending a different DHCP client ID. Routers that lease by MAC
+  address only can't do this, so on those networks run one printer per Pi
+  (see [ADMIN.md](docs/ADMIN.md#how-printer-addresses-work)).
+* **Plain-HTTP admin page.** Use it on the venue's staff network or a cable,
+  not on open guest Wi-Fi.
 * **Identity.** The bridge always reports a TSP143IIILAN. By default it uses
   the host's own MAC; set `mac` per printer to keep printers distinct.
 * **Byte filtering.** The bridge removes the exact bytes `1B 1E 61 00` from

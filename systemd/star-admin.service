@@ -1,0 +1,26 @@
+# Web page for joining Wi-Fi and checking printer addresses (star_admin.py).
+# Installed to /etc/systemd/system/ by scripts/install-admin.sh.
+[Unit]
+Description=Printer bridge web admin (join Wi-Fi, show printer addresses) on port 80
+Documentation=https://github.com/rtfmoz2/star-lan-bridge/blob/main/docs/ADMIN.md
+After=network.target NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/star-lan-bridge/star_admin.py
+# Root: it writes NetworkManager connection files and binds port 80.
+Restart=always
+RestartSec=3
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+# Files it writes: new Wi-Fi profiles, its password file and printer lease records.
+ReadWritePaths=/etc/NetworkManager/system-connections /etc/star-admin
+# Printer DHCP leases (read by the bridge); kept across restarts so addresses stay put.
+RuntimeDirectory=star-lan-bridge
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
+
+[Install]
+WantedBy=multi-user.target

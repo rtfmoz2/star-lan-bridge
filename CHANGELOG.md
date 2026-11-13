@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.3.0 (2026-11-14)
+
+* **Web admin page (`star_admin.py`, `star-admin.service`).** At
+  `http://<hostname>.local`, password-protected: shows the Pi's network and
+  addresses and each printer's address, Bluetooth link and status (ready, out
+  of paper, switched off); scans for Wi-Fi and joins a network now or saves it
+  for later; forgets saved networks. See docs/ADMIN.md.
+* **DHCP-only addressing.** `address = auto` uses the host's own DHCP address;
+  `address = dhcp` gives a printer its own DHCP lease, requested by star-admin
+  with a per-printer client ID and renewed automatically. No fixed addresses
+  are needed, so the same config works on any network.
+* The bridge restarts itself when a printer's address changes (new lease, new
+  network), and skips a printer whose address isn't known yet instead of failing.
+* **Fix: a switched-off printer no longer freezes the bridge.** Opening an RFCOMM
+  device blocked until the printer answered, forever if it was off, which stopped
+  that printer's 9100/9101 service. Connections are now non-blocking with a
+  20-second limit and 10-60 s back-off; while a printer is away, status replies
+  carry the offline bit, and a job arriving during a reconnect waits up to 15 s.
+
 ## 0.2.0 (2026-11-13)
 
 * **Several printers on one host.** `/etc/star-lan-bridge.conf` (see

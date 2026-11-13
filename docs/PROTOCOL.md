@@ -135,8 +135,10 @@ subnet when several are up.
 ### 2.4 Several printers on one host
 
 Clients key printers by IP address and the ports are fixed, so each printer
-gets its own IPv4 address on the host (secondary addresses on one interface
-work, including on Wi-Fi). The bridge then:
+gets its own IPv4 address on the host: secondary addresses on one interface
+work, including on Wi-Fi. In this project each extra printer's address is its
+own DHCP lease, requested with the Pi's MAC and a per-printer DHCP client ID
+(option 61); see [ADMIN.md](ADMIN.md#how-printer-addresses-work). The bridge then:
 
 * answers a **broadcast** query with **one reply per printer**, each sent from
   that printer's own address so the reply's source matches the IP inside it;
@@ -144,9 +146,11 @@ work, including on Wi-Fi). The bridge then:
   address. Linux delivers it to the socket bound to that exact address rather
   than the `0.0.0.0` socket.
 
-Verified with two TSP143IIIBI printers at 192.168.1.134 and 192.168.1.250: a
-broadcast got two replies (one per printer, each from its own address), and a
-unicast got only its own printer **[observed]**.
+Verified with two TSP143IIIBI printers, first at 192.168.1.134 and a fixed
+192.168.1.250, then at 192.168.1.134 (the Pi's DHCP address) and 192.168.1.140
+(printer 2's own DHCP lease from a UniFi router). A broadcast got two replies,
+one per printer and each from its own address, and a unicast got only its own
+printer **[observed]**.
 
 ---
 

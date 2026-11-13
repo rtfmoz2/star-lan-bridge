@@ -90,12 +90,18 @@ bluetoothctl info <MAC> | grep -E "Paired|Bonded|Trusted"     # all three: yes
 * Does the bridge know about it? At start it logs one
   `[NAME] bridge: listening on <address>, <local> ...` line per printer.
   If only one appears, check `/etc/star-lan-bridge.conf`.
-* Is its address on the host? `ip -4 addr show wlan0` must list it. The bridge
-  logs `can't bind <address>:9100 yet ... retrying every 5s` until it appears.
+* Does it have a DHCP lease? `cat /run/star-lan-bridge/lease-<NAME>` should
+  show `ip=...`, and `journalctl -t star-dhcp` shows each lease. With none, check
+  that `star-admin` is running (`systemctl status star-admin`). Until a lease
+  arrives, the bridge logs `no address yet (address = dhcp)` and skips that
+  printer; it restarts by itself when the lease appears.
+* Same address as printer 1? The router leases by MAC only and ignores the DHCP
+  client ID, so this network can't run two printers on one Pi.
 * From another machine, `python3 tools/star_probe.py discover` should get one
   reply per printer, and `discover --host <address>` only that printer.
-* Did something else take the address? Exclude each printer's address from the
-  router's DHCP pool. If another device answers there, the POS reaches it instead.
+* Has the address changed? After a long power-off or on a new network, a
+  printer may get a different lease. The admin page shows the current one.
+  Reserve it on the router so the POS never has to search again.
 
 ## The POS reports the printer is out of paper (or every job "succeeds" but nothing prints)
 
