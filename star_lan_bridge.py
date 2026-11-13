@@ -16,18 +16,23 @@ with the printer, and answers on the network exactly like a TSP143IIILAN:
                client sends a 51-byte query, gets two 11-byte ASB frames, closed
 
 The printer is reached over Bluetooth Serial Port Profile (SPP) through an
-RFCOMM TTY, normally /dev/rfcomm0, which `rfcomm bind` creates (see
-systemd/rfcomm-printer.service). The bridge is meant to be the *only* process
-that opens that TTY. Point any CUPS queue at socket://127.0.0.1:9100 so CUPS
-jobs and POS jobs queue behind each other instead of fighting over the single
-Bluetooth connection the printer accepts.
+RFCOMM TTY, normally /dev/rfcomm0 (rfcomm1, ... for more printers), which
+`rfcomm bind` creates (see systemd/rfcomm-printer.service). The bridge is meant
+to be the *only* process that opens those TTYs. Point each printer's CUPS queue
+at the bridge (socket://127.0.0.1:9100, or that printer's `local` address from
+the config) so CUPS jobs and POS jobs queue behind each other instead of
+fighting over the single Bluetooth connection the printer accepts.
 
 Design notes
 ------------
-* Single-threaded select() loop for TCP + printer I/O, plus one daemon thread
-  for UDP discovery (discovery must never wait behind a slow Bluetooth write).
-* One print client at a time. While a 9100 client is connected the listening
-  socket is left out of select(), so later clients wait in the kernel backlog.
+* One thread per printer, each running a select() loop over that printer's
+  9100/9101 listeners and RFCOMM link, plus one thread for UDP discovery that
+  answers for every printer. Discovery never waits behind a slow Bluetooth
+  write, and one printer's job never delays another's. If any printer's loop
+  crashes, the process exits so systemd restarts it cleanly.
+* One print client at a time per printer. While a 9100 client is connected the
+  listening sockets are left out of select(), so later clients wait in the
+  kernel backlog.
 * Status is never synthesised. POS apps compare the ETB counter they see on
   9100/9101 with what they expect; a fake counter makes them think the job
   failed and resend it. The bridge only relays the printer's real ASB frames.
@@ -35,6 +40,17 @@ Design notes
   ESC RS a 0 (disable ASB) and then poll 9101 for the ETB counter, which only
   updates while ASB is on. The bridge strips that one command from the stream.
   See docs/PROTOCOL.md, "Why ESC RS a 0 is stripped".
+
+Several printers
+----------------
+Star clients identify a printer by IP address and the ports are fixed, so each
+printer needs its own IP. With a config file (default /etc/star-lan-bridge.conf,
+example in examples/star-lan-bridge.conf) the bridge serves one "station" per
+[printer:NAME] section: its own RFCOMM device, LAN address and loopback address
+for CUPS. Discovery broadcasts get one reply per printer, each sent from that
+printer's own address; a unicast query gets only the printer at that address.
+Without a config file the bridge runs a single printer on all addresses, as in
+0.1.0.
 
 Protocol details (discovery template, ASB framing, 9101 behaviour) follow the
 reverse-engineering notes published in github.com/gnaunited/tsp143-bridge
@@ -44,6 +60,7 @@ reverse-engineering notes published in github.com/gnaunited/tsp143-bridge
 from __future__ import annotations
 
 import argparse
+import configparser
 import fcntl
 import logging
 import os
@@ -129,18 +146,21 @@ class AsbDisableFilter:
 
     def feed(self, data: bytes) -> bytes:
         """Return `data` (plus any held bytes) with ESC RS a 0 removed."""
-        buf = self.hold + data
-        n = buf.count(ASB_DISABLE)
-        if n:
-            self.stripped += n
-            buf = buf.replace(ASB_DISABLE, b"")
+        parts = (self.hold + data).split(ASB_DISABLE)
+        self.stripped += len(parts) - 1
+        out = b"".join(parts)
         # Hold back a trailing prefix of the command so it can complete next time.
+        # Look only at the raw bytes after the last removal (parts[-1]): bytes on
+        # either side of a removed command were never adjacent in the stream, so
+        # they must not combine into a new match. ESC RS a 0 can't overlap itself,
+        # so this gives exactly the same result as filtering the whole stream at once.
+        tail = parts[-1]
         for k in (3, 2, 1):
-            if buf.endswith(ASB_DISABLE[:k]):
-                self.hold = buf[-k:]
-                return buf[:-k]
+            if tail.endswith(ASB_DISABLE[:k]):
+                self.hold = tail[-k:]
+                return out[:-k]
         self.hold = b""
-        return buf
+        return out
 
     def flush(self) -> bytes:
         """Release held bytes: the stream ended or went idle, so they weren't the command."""
@@ -234,38 +254,197 @@ def is_discovery_query(data: bytes) -> bool:
     return b"STR_BCAST" in data
 
 
-def discovery_thread(ifaces: list[str]):
-    """UDP 22222 responder. Runs forever in a daemon thread.
+def list_ifaces() -> list[str]:
+    """All network interfaces except loopback."""
+    try:
+        return [n for n in sorted(os.listdir("/sys/class/net")) if n != "lo"]
+    except OSError:
+        return []
 
-    Queries arrive as subnet broadcasts (searching) or unicasts to our IP
-    (checking a printer that is already configured: Next Order POS uses this
-    as its "connected" test). The reply is unicast back to the sender's
-    address and port, from port 22222, as a real printer does.
+
+def subnet_info(ip: bytes, ifaces: list[str] | None = None):
+    """Return (mask, mac, gateway) of the interface whose subnet contains `ip`.
+
+    Used for a printer's own address, which is often a secondary address on
+    an interface (SIOCGIFADDR only reports the primary one, so match by subnet
+    rather than by exact address). Returns None if no interface matches.
     """
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    sock.bind(("0.0.0.0", DISCOVERY_PORT))  # 0.0.0.0 so broadcasts are received too
-    log.info("discovery: listening on UDP %d", DISCOVERY_PORT)
+    for name in ifaces or list_ifaces():
+        info = iface_info(name)
+        if not info:
+            continue
+        own_ip, mask, mac, gw = info
+        if all((a & m) == (b & m) for a, b, m in zip(own_ip, ip, mask)):
+            return mask, mac, gw
+    return None
+
+
+def parse_mac(text: str) -> bytes:
+    """'00:11:62:aa:bb:cc' (or with dashes) -> 6 raw bytes."""
+    raw = bytes.fromhex(text.replace(":", "").replace("-", ""))
+    if len(raw) != 6:
+        raise ValueError(f"not a MAC address: {text!r}")
+    return raw
+
+
+class PrefixLog(logging.LoggerAdapter):
+    """Prefix every log line with the printer's name, e.g. "[TSP143-2] 9100: ..."."""
+
+    def process(self, msg, kwargs):
+        return f"[{self.extra['name']}] {msg}", kwargs
+
+
+class Station:
+    """One emulated Star LAN printer: an RFCOMM device and the addresses it answers on.
+
+    address  LAN IPv4 the printer is advertised at and listens on for 9100/9101/22222.
+             None means "all addresses" (single-printer mode, as in 0.1.0).
+    local    optional extra listen address for CUPS on the same host, e.g.
+             127.0.0.2, so each CUPS queue reaches its own printer via
+             socket://127.0.0.N:9100.
+    mac      MAC address reported in discovery replies; None uses the MAC of the
+             interface the address lives on. Give each printer a distinct MAC:
+             clients may tell printers apart by it.
+    """
+
+    def __init__(self, name: str, device: str, address: str | None = None,
+                 local: str | None = None, mac: bytes | None = None):
+        self.name = name
+        self.device = device
+        self.address = address
+        self.local = local
+        self.mac = mac
+        self.log = PrefixLog(log, {"name": name})
+        self.printer = Printer(device, self.log)
+
+    def listen_addrs(self) -> list[str]:
+        if self.address is None:
+            return ["0.0.0.0"]
+        return [self.address] + ([self.local] if self.local else [])
+
+    def reply_info(self, client_ip: str, ifaces: list[str]):
+        """(ip, mask, mac, gateway) to patch into this printer's discovery reply."""
+        if self.address is None:
+            info = pick_iface(client_ip, ifaces)
+            if info and self.mac:
+                info = (info[0], info[1], self.mac, info[3])
+            return info
+        ip = socket.inet_aton(self.address)
+        sub = subnet_info(ip)
+        if not sub:
+            return None
+        mask, mac, gw = sub
+        return ip, mask, self.mac or mac, gw
+
+
+def load_config(path: str) -> list[Station]:
+    """Read [printer:NAME] sections from an INI file (see examples/star-lan-bridge.conf)."""
+    cp = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
+    if not cp.read(path):
+        raise FileNotFoundError(path)
+    stations, seen = [], set()
+    for section in cp.sections():
+        if not section.startswith("printer:"):
+            continue
+        name = section.split(":", 1)[1].strip() or section
+        s = cp[section]
+        device = s.get("device")
+        address = s.get("address")
+        if not device or not address:
+            raise ValueError(f"[{section}] needs both 'device' and 'address'")
+        socket.inet_aton(address)  # raises on a malformed address
+        local = s.get("local")
+        if local:
+            socket.inet_aton(local)
+        for a in [address] + ([local] if local else []):
+            if a in seen:
+                raise ValueError(f"[{section}] address {a} is used by another printer")
+            seen.add(a)
+        mac = parse_mac(s["mac"]) if s.get("mac") else None
+        stations.append(Station(name, device, address, local, mac))
+    if not stations:
+        raise ValueError(f"{path}: no [printer:NAME] sections")
+    return stations
+
+
+def bind_retry(sock: socket.socket, addr: tuple, what: str, logger) -> None:
+    """Bind, retrying every 5 s while the address isn't there yet.
+
+    At boot the bridge can start before NetworkManager has added a printer's
+    secondary address; waiting beats crash-looping.
+    """
+    warned = False
     while True:
         try:
-            data, addr = sock.recvfrom(2048)
+            sock.bind(addr)
+            if warned:
+                logger.info("%s: bound %s:%d", what, *addr)
+            return
         except OSError as e:
-            log.warning("discovery recv error: %s", e)
-            time.sleep(1)
+            if not warned:
+                logger.warning("%s: can't bind %s:%d yet (%s); retrying every 5s", what, addr[0], addr[1], e)
+                warned = True
+            time.sleep(5)
+
+
+def discovery_thread(stations: list[Station], ifaces: list[str]):
+    """UDP 22222 responder for every printer. Runs forever in a daemon thread.
+
+    Queries arrive as subnet broadcasts (searching) or unicasts to one
+    printer's IP (checking a printer that is already configured: Next Order
+    POS uses this as its "connected" test). Replies are unicast back to the
+    sender's address and port, from port 22222, as a real printer does.
+
+    Sockets:
+      * one bound to 0.0.0.0:22222 receives broadcasts (and unicasts to any
+        address no printer owns) and is answered with one reply per printer;
+      * one per printer bound to that printer's own address receives unicasts
+        to it (Linux delivers to the most specific bind) and is answered for
+        that printer only. Each printer's replies are sent from its own socket,
+        so their source address matches the IP inside the reply.
+    """
+    wild = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    wild.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    wild.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    wild.bind(("0.0.0.0", DISCOVERY_PORT))
+    owner: dict[socket.socket, Station] = {}
+    sender: dict[Station, socket.socket] = {}
+    for st in stations:
+        if st.address is None:
+            sender[st] = wild
             continue
-        if not is_discovery_query(data):
-            # Log unknown packets: useful when a new client speaks a variant.
-            log.info("discovery: ignored %d-byte UDP packet from %s:%d: %s",
-                     len(data), addr[0], addr[1], data[:32].hex(" "))
-            continue
-        info = pick_iface(addr[0], ifaces)
-        if not info:
-            log.warning("discovery: no usable interface to answer %s", addr[0])
-            continue
-        sock.sendto(build_discovery_reply(info), addr)
-        log.info("discovery: answered %s:%d as TSP143IIILAN @ %s",
-                 addr[0], addr[1], socket.inet_ntoa(info[0]))
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        bind_retry(s, (st.address, DISCOVERY_PORT), "discovery", st.log)
+        owner[s], sender[st] = st, s
+    log.info("discovery: listening on UDP %d for %d printer(s)", DISCOVERY_PORT, len(stations))
+    socks = [wild] + list(owner)
+    while True:
+        r, _, _ = select.select(socks, [], [], 5.0)
+        for sock in r:
+            try:
+                data, addr = sock.recvfrom(2048)
+            except OSError as e:
+                log.warning("discovery recv error: %s", e)
+                continue
+            if not is_discovery_query(data):
+                # Log unknown packets: useful when a new client speaks a variant.
+                log.info("discovery: ignored %d-byte UDP packet from %s:%d: %s",
+                         len(data), addr[0], addr[1], data[:32].hex(" "))
+                continue
+            targets = [owner[sock]] if sock in owner else stations
+            for st in targets:
+                info = st.reply_info(addr[0], ifaces)
+                if not info:
+                    st.log.warning("discovery: no usable interface to answer %s", addr[0])
+                    continue
+                try:
+                    sender[st].sendto(build_discovery_reply(info), addr)
+                except OSError as e:
+                    st.log.warning("discovery: reply to %s failed: %s", addr[0], e)
+                    continue
+                st.log.info("discovery: answered %s:%d as TSP143IIILAN @ %s",
+                            addr[0], addr[1], socket.inet_ntoa(info[0]))
 
 
 # ---------------------------------------------------------------------------
@@ -307,8 +486,9 @@ class Printer:
     removes a several-second reconnect from the start of every receipt.
     """
 
-    def __init__(self, path: str):
+    def __init__(self, path: str, logger=None):
         self.path = path
+        self.log = logger or log           # per-printer prefixed logger
         self.fd: int | None = None
         self.rxbuf = b""                  # bytes from the printer not yet parsed into frames
         self.last_asb = IDLE_ASB_LAN      # most recent status, already in LAN format
@@ -328,17 +508,17 @@ class Printer:
             os.write(fd, ASB_ENABLE)  # we always want unsolicited status frames
             self.fd = fd
             self.rxbuf = b""
-            log.info("printer: connected via %s, ASB enabled", self.path)
+            self.log.info("printer: connected via %s, ASB enabled", self.path)
             return True
         except OSError as e:
-            log.warning("printer: open %s failed: %s (retry in 10s)", self.path, e)
+            self.log.warning("printer: open %s failed: %s (retry in 10s)", self.path, e)
             self.next_retry = time.time() + 10
             return False
 
     def close(self, why: str):
         """Drop the link after an error; the next write or loop tick reopens it."""
         if self.fd is not None:
-            log.warning("printer: link closed (%s)", why)
+            self.log.warning("printer: link closed (%s)", why)
             try:
                 os.close(self.fd)
             except OSError:
@@ -380,7 +560,7 @@ class Printer:
         while self.rxbuf:
             size = asb_size(self.rxbuf[0])
             if not (self.rxbuf[0] & 1) or size < 2:
-                log.debug("printer: dropping non-ASB byte %02x", self.rxbuf[0])
+                self.log.debug("printer: dropping non-ASB byte %02x", self.rxbuf[0])
                 self.rxbuf = self.rxbuf[1:]
                 continue
             if len(self.rxbuf) < size:
@@ -409,19 +589,22 @@ class Printer:
 # ---------------------------------------------------------------------------
 # TCP side: 9100 print channel and 9101 status channel
 # ---------------------------------------------------------------------------
-def listen(port: int) -> socket.socket:
+def listen(addr: str, port: int, logger) -> socket.socket:
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    s.bind(("0.0.0.0", port))
+    bind_retry(s, (addr, port), f"tcp {port}", logger)
     s.listen(8)  # waiting print clients (e.g. CUPS behind a POS job) queue here
     return s
 
 
-def serve(printer: Printer):
-    """Main event loop. Never returns."""
-    print_srv = listen(PRINT_PORT)
-    status_srv = listen(STATUS_PORT)
-    log.info("bridge: listening on TCP %d (print) and %d (status)", PRINT_PORT, STATUS_PORT)
+def serve(station: Station):
+    """Event loop for one printer: its 9100/9101 listeners and its RFCOMM link. Never returns."""
+    printer, slog = station.printer, station.log
+    addrs = station.listen_addrs()
+    print_srvs = [listen(a, PRINT_PORT, slog) for a in addrs]
+    status_srvs = [listen(a, STATUS_PORT, slog) for a in addrs]
+    slog.info("bridge: listening on %s TCP %d (print) and %d (status), printer %s",
+              ", ".join(addrs), PRINT_PORT, STATUS_PORT, station.device)
     client: socket.socket | None = None   # the one active 9100 client, if any
     client_name = ""
     client_bytes = 0
@@ -429,9 +612,9 @@ def serve(printer: Printer):
 
     printer.ensure_open()
     while True:
-        rlist = [status_srv]
+        rlist = list(status_srvs)
         # One print client at a time: while one is active, stop accepting new ones.
-        rlist.append(client if client else print_srv)
+        rlist += [client] if client else print_srvs
         if printer.fd is not None:
             rlist.append(printer.fd)
         # Short timeout only while holding a partial ESC RS a 0 match, so it is
@@ -454,16 +637,17 @@ def serve(printer: Printer):
                         pass  # client went away; noticed on its next recv
 
         # New 9100 client: greet it with the current status, as a LAN printer does.
-        if print_srv in r and client is None:
-            client, addr = print_srv.accept()
-            client_name, client_bytes = f"{addr[0]}:{addr[1]}", 0
-            filt = AsbDisableFilter()
-            log.info("9100: connection from %s", client_name)
-            if printer.ensure_open():
-                try:
-                    client.sendall(printer.last_asb)
-                except OSError:
-                    pass
+        for srv in print_srvs:
+            if srv in r and client is None:
+                client, addr = srv.accept()
+                client_name, client_bytes = f"{addr[0]}:{addr[1]}", 0
+                filt = AsbDisableFilter()
+                slog.info("9100: connection from %s", client_name)
+                if printer.ensure_open():
+                    try:
+                        client.sendall(printer.last_asb)
+                    except OSError:
+                        pass
 
         # Client -> printer: forward print data (minus ESC RS a 0).
         if client and client in r:
@@ -474,15 +658,15 @@ def serve(printer: Printer):
             if data:
                 client_bytes += len(data)
                 if not printer.write(filt.feed(data)):
-                    log.warning("9100: printer unavailable, dropping %s", client_name)
+                    slog.warning("9100: printer unavailable, dropping %s", client_name)
                     client.close()
                     client = None
             else:
                 # Client closed its side: the job is complete.
                 printer.write(filt.flush())
-                log.info("9100: %s finished, %d bytes received, %d ASB-disable cmd(s) stripped, "
-                         "status now %s", client_name, client_bytes, filt.stripped,
-                         printer.last_asb.hex(" "))
+                slog.info("9100: %s finished, %d bytes received, %d ASB-disable cmd(s) stripped, "
+                          "status now %s", client_name, client_bytes, filt.stripped,
+                          printer.last_asb.hex(" "))
                 client.close()
                 client = None
                 printer.write(ASB_ENABLE)  # belt and braces: make sure ASB is still on
@@ -490,8 +674,10 @@ def serve(printer: Printer):
         # 9101 poll: read the query (content isn't checked), answer with the
         # latest real status twice, close. StarIO polls this every ~200 ms
         # during a job, so it must stay fast.
-        if status_srv in r:
-            conn, addr = status_srv.accept()
+        for srv in status_srvs:
+            if srv not in r:
+                continue
+            conn, addr = srv.accept()
             conn.settimeout(0.3)
             try:
                 query = conn.recv(64)
@@ -505,23 +691,48 @@ def serve(printer: Printer):
             except OSError:
                 pass
             conn.close()
-            log.debug("9101: %s query %d bytes -> %s", addr[0], len(query), printer.last_asb.hex(" "))
+            slog.debug("9101: %s query %d bytes -> %s", addr[0], len(query), printer.last_asb.hex(" "))
+
+
+def run_station(station: Station):
+    """Thread wrapper: if one printer's loop crashes, exit so systemd restarts everything."""
+    try:
+        serve(station)
+    except Exception:
+        station.log.exception("bridge: fatal error")
+        os._exit(1)
+
+
+DEFAULT_CONFIG = "/etc/star-lan-bridge.conf"
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("-c", "--config", default=DEFAULT_CONFIG,
+                    help=f"INI file with one [printer:NAME] section per printer (default: {DEFAULT_CONFIG}). "
+                         "If it doesn't exist, a single printer is served on all addresses.")
     ap.add_argument("-d", "--device", default="/dev/rfcomm0",
-                    help="RFCOMM TTY bound to the printer (default: /dev/rfcomm0)")
+                    help="single-printer mode: RFCOMM TTY bound to the printer (default: /dev/rfcomm0)")
     ap.add_argument("-i", "--iface", action="append",
-                    help="interface to advertise in discovery replies; repeat for several "
-                         "(default: wlan0 then eth0)")
+                    help="single-printer mode: interface to advertise in discovery replies; repeat for "
+                         "several (default: wlan0 then eth0)")
     ap.add_argument("-v", "--verbose", action="store_true", help="debug logging (logs every 9101 poll)")
     a = ap.parse_args()
     logging.basicConfig(level=logging.DEBUG if a.verbose else logging.INFO,
                         format="%(levelname)s %(message)s")
     ifaces = a.iface or ["wlan0", "eth0"]
-    threading.Thread(target=discovery_thread, args=(ifaces,), daemon=True).start()
-    serve(Printer(a.device))
+    if os.path.exists(a.config):
+        stations = load_config(a.config)
+        log.info("config %s: %s", a.config,
+                 "; ".join(f"{s.name}={s.device}@{s.address}" for s in stations))
+    else:
+        stations = [Station("printer", a.device)]
+    threading.Thread(target=discovery_thread, args=(stations, ifaces), daemon=True).start()
+    threads = [threading.Thread(target=run_station, args=(s,), name=s.name) for s in stations]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
 
 
 if __name__ == "__main__":

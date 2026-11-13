@@ -139,6 +139,49 @@ class DiscoveryTest(unittest.TestCase):
         self.assertFalse(bridge.is_discovery_query(b"EPSONQ\0\0\0\0\0\0\0\0"))
 
 
+class ConfigTest(unittest.TestCase):
+    def write(self, text):
+        import tempfile
+        f = tempfile.NamedTemporaryFile("w", suffix=".conf", delete=False)
+        f.write(text)
+        f.close()
+        self.addCleanup(os.unlink, f.name)
+        return f.name
+
+    def test_example_config_loads(self):
+        stations = bridge.load_config(os.path.join(ROOT, "examples", "star-lan-bridge.conf"))
+        self.assertEqual([s.name for s in stations], ["TSP143", "TSP143-2"])
+        a, b = stations
+        self.assertEqual(a.listen_addrs(), ["192.168.1.134", "127.0.0.1"])
+        self.assertEqual(b.listen_addrs(), ["192.168.1.250", "127.0.0.2"])
+        self.assertIsNone(a.mac)
+        self.assertEqual(b.mac, bytes.fromhex("0011622e7505"))
+        self.assertEqual(b.device, "/dev/rfcomm1")
+
+    def test_duplicate_address_rejected(self):
+        path = self.write("[printer:a]\ndevice=/dev/rfcomm0\naddress=10.0.0.5\n"
+                          "[printer:b]\ndevice=/dev/rfcomm1\naddress=10.0.0.5\n")
+        with self.assertRaises(ValueError):
+            bridge.load_config(path)
+
+    def test_missing_fields_rejected(self):
+        with self.assertRaises(ValueError):
+            bridge.load_config(self.write("[printer:a]\ndevice=/dev/rfcomm0\n"))
+        with self.assertRaises(ValueError):
+            bridge.load_config(self.write("[other]\nx=1\n"))
+        with self.assertRaises(OSError):
+            bridge.load_config(self.write("[printer:a]\ndevice=/dev/rfcomm0\naddress=not-an-ip\n"))
+
+    def test_single_printer_mode_listens_everywhere(self):
+        st = bridge.Station("printer", "/dev/rfcomm0")
+        self.assertEqual(st.listen_addrs(), ["0.0.0.0"])
+
+    def test_parse_mac(self):
+        self.assertEqual(bridge.parse_mac("00-11-62-2E-75-05"), bytes.fromhex("0011622e7505"))
+        with self.assertRaises(ValueError):
+            bridge.parse_mac("00:11:62")
+
+
 class ProbeTest(unittest.TestCase):
     def test_etb_counter_decode(self):
         self.assertIn("etb_counter=1", probe.asb_fields(bytes.fromhex("2386020000000002000000")))

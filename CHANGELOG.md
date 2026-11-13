@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.2.0 (2026-11-13)
+
+* **Several printers on one host.** `/etc/star-lan-bridge.conf` (see
+  `examples/star-lan-bridge.conf`) defines one `[printer:NAME]` per printer,
+  each with its own RFCOMM `device`, LAN `address`, optional loopback `local`
+  address for CUPS and optional discovery `mac`. Broadcast discovery gets one
+  reply per printer, each from its own address; a unicast query gets only the
+  printer at that address. Each printer has its own 9100/9101 listeners and
+  link. Without a config file the bridge behaves exactly as in 0.1.0.
+* Log lines are prefixed with the printer's name, e.g. `[TSP143-2] 9100: ...`.
+* Listeners wait for an address that isn't up yet (for example a secondary IP
+  NetworkManager hasn't added at boot) instead of crash-looping.
+* Fix: the `ESC RS a 0` filter could strip a lookalike sequence formed by the
+  bytes on either side of a removed command when it arrived across reads.
+  Chunked filtering now matches whole-stream filtering exactly.
+* docs: SETUP.md §7 "Several printers"; PROTOCOL.md §2.4 multi-printer
+  discovery and the observed paper-empty ASB pattern.
+* docs: README covers several printers; TROUBLESHOOTING.md adds pairing that
+  won't stick, a second printer that doesn't appear, and paper-out status;
+  repository URLs filled in.
+
 ## 0.1.0 (2026-11-13)
 
 First release.
