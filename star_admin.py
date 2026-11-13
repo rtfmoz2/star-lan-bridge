@@ -955,6 +955,9 @@ box.onchange = async () => {
     box.checked = true; return;
   }
   box.disabled = true; msg.innerHTML = "";
+  // Pending badge while systemctl works (a few seconds, mostly when turning off).
+  state.textContent = want ? "Turning on…" : "Turning off…";
+  state.className = "pill warn";
   try {
     const r = await fetch("/api/ssh", {method:"POST", headers:H, credentials:"same-origin", body:JSON.stringify({enabled:want})});
     if (r.status === 401) return location.reload();
