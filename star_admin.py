@@ -913,7 +913,7 @@ function render(s) {
   let rows = `<dt>Wi-Fi</dt><dd>${wifi}</dd><dt>Gateway</dt><dd class="mono">${esc(s.gateway)||"none"}</dd>`;
   for (const i of s.interfaces) {
     if (!i.addresses.length) continue;
-    const a = i.addresses.map(x => `<span class="ip">${esc(x.ip)}</span><small> /${x.prefix}${x.dhcp?" · DHCP":" · fixed"}</small>`).join("<br>");
+    const a = i.addresses.map(x => `<span class="mono">${esc(x.ip)}</span><small> /${x.prefix}${x.dhcp?" · DHCP":" · fixed"}</small>`).join("<br>");
     rows += `<dt>${esc(i.name)}</dt><dd>${a}</dd>`;
   }
   $("net").innerHTML = rows;
