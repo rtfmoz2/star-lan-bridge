@@ -86,7 +86,7 @@ and no route to the internet.
 |---|---|
 | **Firewall** (`hardening/nftables.conf`) | Inbound default **drop**. Allowed only from private and link-local addresses: TCP 22, 80, 9100, 9101; UDP 22222 and mDNS 5353. Also DHCP replies, ICMP, and replies to the Pi's own connections. Forwarding is off. |
 | **CUPS** | Local only: no sharing, no remote admin, no web interface; port 631 is closed. Local queues still print through the bridge. |
-| **SSH** | Key login only; no root login, X11, TCP or agent forwarding, or tunnels; 3 tries per connection, 20 s to log in. |
+| **SSH** | Key login only; no root login, X11, TCP or agent forwarding, or tunnels; 3 tries per connection, 20 s to log in. Can be **turned off entirely** after deployment from the admin page's `/sshctl` (next section). |
 | **Bluetooth** | Not discoverable and not pairable, so nothing new can pair with the Pi. Pairing a printer needs `pairable on` first (SETUP.md). |
 | **Updates** | **Set and forget:** `harden.sh` installs all pending Debian **security** updates once, then turns automatic updates **off** (apt timers and unattended-upgrades disabled), so the device never changes by itself. With `--auto-updates` they stay on: security archive only, daily, rebooting at 03:30 only when needed. |
 
@@ -123,15 +123,72 @@ every change. It's reachable from the venue network only (firewall). By choice
 it is **plain HTTP**, so the admin and Wi-Fi passwords cross the staff network
 unencrypted when you use it. Keep its use short, or use a cable.
 
+## Turning SSH off after deployment (`/sshctl`)
+
+Once a Pi is installed at a venue, nobody needs to log in to it, so SSH can be
+switched off completely: then there's no login service on the network at all.
+
+Open **`http://<hostname>.local/sshctl`**. The page isn't linked from the admin
+page, but it **requires the same admin sign-in**; signing in from it returns you
+to it. It shows **SSH Connections:** with a badge:
+
+| Badge | Meaning |
+|---|---|
+| `Accepted` (green) | SSH is on: new logins accepted |
+| `Denied` (red) | SSH is off: new logins refused |
+| `Turning off…` / `Turning on…` (amber) | Change in progress (a few seconds) |
+
+Untick **Allow SSH logins** (and confirm) to turn it off; tick it to turn it back on.
+
+* **Off** stops `ssh.service` and disables it at boot, and makes sure
+  `ssh.socket` (socket activation) is off too, so it stays off after reboots
+  and power cuts. Port 22 then has nothing listening, and connections are
+  refused. **Sessions already open are not ended;** they last until they
+  disconnect.
+* **On** starts and re-enables `ssh.service`. The hardening above still
+  applies: key login only, no root.
+* **Every change is logged** with the address it came from:
+
+  ```bash
+  journalctl -u star-admin -g 'ssh: '
+  # ... WARNING ssh: disable requested by 192.168.1.233
+  # ... WARNING ssh: now off
+  ```
+
+* The admin page and the printers are unaffected either way.
+
+**Getting SSH back without the page.** Raspberry Pi OS turns SSH on at boot if
+a file named `ssh` is on the SD card's boot partition (`sshswitch.service`, left
+enabled). Power the Pi off, put the card in a laptop, create an empty file named
+`ssh` (or `ssh.txt`, easier on Windows) on the boot partition (it shows up as
+`bootfs`), put the card back and start the Pi. At boot, Raspberry Pi OS deletes
+the file and turns SSH on and enables it at boot, with the same key-only
+settings. `/sshctl` then shows `Accepted`.
+
+**Notes**
+
+* "Hidden" only means unlinked: the page is in this repository's source code.
+  The admin password is what protects it.
+* The page runs inside star-admin's sandbox, where `/etc` is read-only. It calls
+  `systemctl` with `SYSTEMCTL_SKIP_SYSV=1` so Debian's SysV init-script
+  mirroring (which writes `/etc/rc*.d`) is skipped. Without that, turning SSH
+  off failed with "Read-only file system". Those links are ignored anyway,
+  because ssh has a native systemd unit.
+* The firewall still allows TCP 22 from the venue LAN, so turning SSH back on
+  needs no firewall change. With SSH off, nothing answers there.
+
 ## Remaining risks and recommendations
 
 * **Physical access.** The SD card isn't encrypted, so anyone who takes it can
   read the Wi-Fi passwords and SSH keys. Mount the Pi out of reach of the public.
 * **The admin account has passwordless sudo.** Anyone with that SSH key is
-  root. Keep the key on admin machines only, or remove
-  `/etc/sudoers.d/010_<user>-nopasswd` after deployment (later maintenance then
-  needs the account password).
-* **The admin page is plain HTTP** (above).
+  root. Keep the key on admin machines only, or turn SSH off at `/sshctl` once
+  the Pi is installed (above). You can also remove
+  `/etc/sudoers.d/010_<user>-nopasswd` after deployment; later maintenance
+  then needs the account password.
+* **The admin page is plain HTTP** (above). That includes `/sshctl`: anyone who
+  learns the admin password, for example by watching the staff network, could
+  turn SSH back on. Keys are still required to log in.
 * **Staff Wi-Fi is the boundary.** Anyone who has its password can print and
   open the cash drawer.
 * **No automatic updates.** Security fixes published after deployment don't

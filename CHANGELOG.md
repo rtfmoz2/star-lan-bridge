@@ -42,6 +42,11 @@ Hardening for commercial deployment (docs/SECURITY.md).
   last row, Status, shows print readiness (Ready, Out of paper, Switched off or
   out of Bluetooth range) instead of raw status bytes, which remain as a
   tooltip. The separate Bluetooth row and address explanation are gone.
+* **`/sshctl`:** an admin page not linked from the main page (sign-in
+  required) that turns SSH logins off or on, now and at boot, with a status
+  badge (Accepted, Denied, or pending while it changes) and every change
+  logged. Recovery without the page: an `ssh` file on the boot partition.
+  See SECURITY.md.
 * **Admin page:** never shows cached data. Responses can't be cached, the page
   refreshes when it comes back into view, and it shows when it last updated
   (or a warning if the Pi can't be reached). Routes ignore query strings.
