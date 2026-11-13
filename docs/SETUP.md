@@ -112,6 +112,76 @@ In the POS app, search for **Star LAN** printers, or add one by IP using the Pi'
 address. In Next Order POS 6.0.0, the printer showed as *connected* and printed
 with the app's TSP100III model set to either the W (Wi-Fi) or the LAN variant.
 
+## 7. Several printers
+
+Each printer needs its own LAN address, because Star clients identify printers by
+IP and the ports (22222, 9100, 9101) are fixed. On Wi-Fi, add the extra address
+to the existing connection. It shares the Pi's MAC, so access points accept it:
+a virtual interface with its own MAC (macvlan) generally won't work on Wi-Fi.
+
+1. **Pick an unused address**, ideally outside the router's DHCP pool (or
+   excluded from it), so nothing else gets handed the same IP:
+
+   ```bash
+   # Pi: no reply and an INCOMPLETE neighbour entry means nothing answers there
+   ping -c2 -W1 192.168.1.250; ip neigh show 192.168.1.250
+   ```
+
+2. **Add it as a second address** on the Wi-Fi connection. `reapply` applies it
+   without dropping the link:
+
+   ```bash
+   # Pi
+   C=$(nmcli -t -f NAME,DEVICE con show --active | grep ":wlan0$" | cut -d: -f1)
+   sudo nmcli con mod "$C" +ipv4.addresses 192.168.1.250/24
+   sudo nmcli dev reapply wlan0
+   ip -4 addr show wlan0
+   ```
+
+   DHCP keeps working for the Pi's main address. Give that one a DHCP
+   reservation too: the bridge listens on it explicitly once a config file
+   exists, so a changed lease means editing the config.
+
+3. **Pair the second printer and bind it to `/dev/rfcomm1`.** If pairing shows
+   `Paired: yes` and then `Paired: no` right away, the adapter isn't pairable:
+   run `pairable on` in the same `bluetoothctl` session before `pair`.
+
+   ```bash
+   # Pi
+   M2=00:11:62:DD:EE:FF
+   { echo "pairable on"; sleep 1; echo "pair $M2"; sleep 15; echo "trust $M2"; sleep 3; echo quit; } | bluetoothctl
+   sed -e "s/@PRINTER_MAC@/$M2/g" -e "s/@CHANNEL@/1/g" \
+       -e "s/rfcomm bind 0/rfcomm bind 1/" -e "s/rfcomm release 0/rfcomm release 1/" \
+       -e "s#/dev/rfcomm0#/dev/rfcomm1#" \
+       systemd/rfcomm-printer.service | sudo tee /etc/systemd/system/rfcomm-printer2.service
+   sudo systemctl daemon-reload && sudo systemctl enable --now rfcomm-printer2
+   ```
+
+4. **Write `/etc/star-lan-bridge.conf`** (start from
+   [examples/star-lan-bridge.conf](../examples/star-lan-bridge.conf)). Use one
+   `[printer:NAME]` section per printer, each with its own `device`, `address`
+   and `local`, and a distinct `mac` for every printer after the first. Keep the
+   first printer's address and MAC unchanged so POS terminals that already
+   know it still recognise it.
+
+5. **Restart the bridge and point each CUPS queue at its printer's local address:**
+
+   ```bash
+   # Pi
+   sudo systemctl restart star-lan-bridge
+   journalctl -u star-lan-bridge -n 10 -o cat     # one "listening on" line per printer
+   sudo lpadmin -p TSP143-2 -E -v socket://127.0.0.2:9100 -m star/tsp143.ppd -o printer-is-shared=true
+   ```
+
+6. **Check from another machine.** A broadcast should get one reply per printer,
+   and a unicast only the printer at that address:
+
+   ```bash
+   python3 tools/star_probe.py discover --broadcast 192.168.1.255
+   python3 tools/star_probe.py discover --host 192.168.1.250
+   python3 tools/star_probe.py status --host 192.168.1.250
+   ```
+
 ## Uninstall
 
 ```bash

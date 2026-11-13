@@ -70,6 +70,7 @@ Then search for Star LAN printers in your POS app.
 ```
 star_lan_bridge.py            the bridge (stdlib only)
 tools/star_probe.py           read-only StarIO client: discover / status / etb
+examples/star-lan-bridge.conf two-printer config (/etc/star-lan-bridge.conf)
 systemd/star-lan-bridge.service
 systemd/rfcomm-printer.service    template; install.sh fills in MAC and channel
 scripts/install.sh            install bridge + rfcomm binding, optionally repoint CUPS
@@ -88,8 +89,11 @@ docs/                         setup, protocol and troubleshooting docs
   which is fine for a receipt printer.
 * **Same subnet only.** Discovery is broadcast-based, so the POS must be on the
   bridge's subnet. Turn off Wi-Fi client isolation.
-* **Identity.** The bridge always reports a TSP143IIILAN and uses the host's
-  own MAC address.
+* **One IP per printer.** Star clients find printers by IP and the ports are
+  fixed, so each extra printer needs its own address on the host. On Wi-Fi
+  that means extra IPs on `wlan0` (see [SETUP.md §7](docs/SETUP.md#7-several-printers)).
+* **Identity.** The bridge always reports a TSP143IIILAN. By default it uses
+  the host's own MAC; set `mac` per printer to keep printers distinct.
 * **Byte filtering.** The bridge removes the exact bytes `1B 1E 61 00` from
   print data (see [PROTOCOL.md §4.3](docs/PROTOCOL.md#43-why-esc-rs-a-0-is-stripped)).
 * **Linux only.** The bridge uses termios and Linux ioctls. The probe tool also

@@ -129,6 +129,24 @@ subnet when several are up.
 * **MAC.** The bridge reports the Pi's own MAC (`dc:a6:32:…`), not a Star
   `00:11:62:…` address. No client rejected this **[observed]**. A client that
   pins printers by MAC would need a stable value, and the Pi's MAC is stable.
+  With several printers, give each a distinct MAC (`mac =` in the config). The
+  second printer in the reference setup reports its own Bluetooth MAC.
+
+### 2.4 Several printers on one host
+
+Clients key printers by IP address and the ports are fixed, so each printer
+gets its own IPv4 address on the host (secondary addresses on one interface
+work, including on Wi-Fi). The bridge then:
+
+* answers a **broadcast** query with **one reply per printer**, each sent from
+  that printer's own address so the reply's source matches the IP inside it;
+* answers a **unicast** query only for the printer that owns the destination
+  address. Linux delivers it to the socket bound to that exact address rather
+  than the `0.0.0.0` socket.
+
+Verified with two TSP143IIIBI printers at 192.168.1.134 and 192.168.1.250: a
+broadcast got two replies (one per printer, each from its own address), and a
+unicast got only its own printer **[observed]**.
 
 ---
 
@@ -176,6 +194,12 @@ LAN shape they expect from a network printer.
 The remaining bytes carry printer status, error and paper-sensor bits. See
 Star's ASB specification for the full bit map. The bridge passes them through
 unchanged and never interprets or synthesises them.
+
+One more pattern was seen on a printer with **no paper loaded**: bit 3 of byte 2
+and bit 3 of byte 5 set (`08`), in LAN shape
+`23 86 08 00 00 08 00 02 00 00 00` **[observed]**. This is the status a POS app
+reads to warn about paper; the job was still accepted on 9100 and logged as
+finished.
 
 Observed on the Bluetooth TSP143IIIBI over `/dev/rfcomm0`:
 
