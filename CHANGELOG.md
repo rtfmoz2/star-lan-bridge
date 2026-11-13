@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.4.0 (2026-11-14)
+
+Hardening for commercial deployment (docs/SECURITY.md).
+
+* **Bridge:** only devices on the host's own subnets (and loopback) may print,
+  poll or discover. 9100 connections close after 60 s idle or 5 minutes, and
+  jobs over 8 MB are cut off. 9101 queries are handled without blocking and
+  rate-limited. Fresh printer status is requested at most every 2 s.
+  Discovery is rate-limited, never replies to spoofed or outside sources, and
+  ignores oversized packets. Logs of refusals and floods are throttled. The
+  printer receive buffer is capped.
+* **Fuzz tests** (`tests/test_fuzz.py`) run the real bridge loop against a fake
+  printer with random jobs, idle, oversized and reset connections, garbage
+  9101 queries, silent-client floods, printer garbage and junk UDP. They found,
+  and this release fixes, two ways to stall a printer: silent 9101 clients and
+  repeated status requests to a printer that doesn't answer.
+* **systemd sandbox:** the bridge runs with no capabilities, RFCOMM devices
+  only, a system-call filter and no route to the internet (exposure score
+  1.8). star-admin keeps only three network capabilities (2.4).
+* **`scripts/harden.sh`:** nftables default-deny firewall for venue-LAN-only
+  access (with a 3-minute automatic rollback until confirmed), CUPS local only,
+  SSH key-only with no root or forwarding, Bluetooth not discoverable or
+  pairable. Pending Debian security updates are installed once, then automatic
+  updates are turned off (set-and-forget); `--auto-updates` keeps them on,
+  security archive only.
+* **Logs and storage:** the journal is kept across reboots (it was RAM-only)
+  with hard limits: 100 MB, one month, 2 GB always free, and a per-service
+  rate limit. apt no longer keeps downloaded packages (195 MB freed); CUPS
+  logs warnings only, up to 1 MB. The admin page no longer logs routine page
+  loads and refreshes.
+* **docs:** new LOGS.md: where each part logs, everyday journalctl recipes,
+  logs from before a power cut, copying logs to a laptop, and what the
+  important lines mean.
+* **docs:** corrected the DHCP reservation advice. A fixed IP for the Pi's MAC
+  on UniFi and other MAC-based routers can capture every printer lease, so
+  with several printers, leave the leases as plain DHCP (ADMIN.md, "Router
+  reservations").
+* **Admin page printer cards:** the top right shows the printer's connection
+  (connected, connecting, not connected); the Address row shows its IP; the
+  last row, Status, shows print readiness (Ready, Out of paper, Switched off or
+  out of Bluetooth range) instead of raw status bytes, which remain as a
+  tooltip. The separate Bluetooth row and address explanation are gone.
+* **Admin page:** never shows cached data. Responses can't be cached, the page
+  refreshes when it comes back into view, and it shows when it last updated
+  (or a warning if the Pi can't be reached). Routes ignore query strings.
+
 ## 0.3.0 (2026-11-14)
 
 * **Web admin page (`star_admin.py`, `star-admin.service`).** At

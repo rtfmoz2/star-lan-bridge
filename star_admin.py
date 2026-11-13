@@ -50,7 +50,7 @@ import sys
 import threading
 import time
 import uuid as uuidlib
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlsplit
 
 log = logging.getLogger("star-admin")
 
@@ -654,7 +654,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     # -- plumbing --
     def log_message(self, fmt, *args):
-        log.info("%s %s", self.client_address[0], fmt % args)
+        # Skip routine page loads and the page's 5-second status refresh; log
+        # sign-ins, changes and anything that failed.
+        msg = fmt % args
+        if self.command == "GET" and '" 200 ' in msg:
+            return
+        log.info("%s %s", self.client_address[0], msg)
 
     def cookie_token(self) -> str | None:
         for part in self.headers.get("Cookie", "").split(";"):
@@ -667,7 +672,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        # Never let a browser (or its back/forward cache) show old addresses.
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
@@ -695,14 +703,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return SESSIONS.valid(self.cookie_token())
 
     # -- routes --
+    def route(self) -> str:
+        """Request path without the query string (the page adds ?t=... to dodge caches)."""
+        return urlsplit(self.path).path
+
     def do_GET(self):
-        if self.path == "/" or self.path.startswith("/?"):
+        path = self.route()
+        if path == "/":
             if not load_auth():
                 return self.send(503, page_no_password().encode(), "text/html; charset=utf-8")
             if not self.authed():
                 return self.send(200, page_login("").encode(), "text/html; charset=utf-8")
             return self.send(200, page_app().encode(), "text/html; charset=utf-8")
-        if self.path == "/api/status":
+        if path == "/api/status":
             if not self.authed():
                 return self.json(401, {"error": "Sign in again."})
             return self.json(200, status())
@@ -710,22 +723,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         client = self.client_address[0]
+        path = self.route()
         try:
-            if self.path == "/login":
+            if path == "/login":
                 return self.login(client)
             if not self.authed():
                 return self.json(401, {"error": "Sign in again."})
             if self.headers.get("X-Star-Admin") != "1":
                 return self.json(403, {"error": "Missing request header."})
             data = json.loads(self.body() or b"{}")
-            if self.path == "/logout":
+            if path == "/logout":
                 SESSIONS.drop(self.cookie_token())
                 return self.json(200, {"ok": True})
-            if self.path == "/api/scan":
+            if path == "/api/scan":
                 return self.json(200, {"networks": wifi_networks(rescan=True)})
-            if self.path == "/api/join":
+            if path == "/api/join":
                 return self.join(data)
-            if self.path == "/api/forget":
+            if path == "/api/forget":
                 return self.forget(data)
             self.json(404, {"error": "Not found."})
         except ValueError as e:
@@ -846,6 +860,7 @@ APP_HTML = """
   <div><h1>Printer bridge</h1><p class="sub mono">{{HOST}}.local</p></div>
   <button class="ghost" id="logout" type="button">Sign out</button>
 </div>
+<p class="sub" id="updated" role="status">Loading…</p>
 
 <section class="card" aria-labelledby="h-net">
   <h2 id="h-net">Network</h2>
@@ -892,15 +907,6 @@ async function post(path, body) {
   if (!r.ok) throw new Error(j.error || ("Error " + r.status));
   return j;
 }
-function addrMode(p){
-  if (p.mode === "auto") return "DHCP (the Pi's own address)";
-  if (p.mode === "dhcp") {
-    if (!p.lease_expires) return "DHCP (own lease, requesting…)";
-    const h = Math.max(0, Math.round((p.lease_expires - Date.now()/1000) / 3600));
-    return `DHCP (own lease, renews automatically, ${h} h left)`;
-  }
-  return "fixed";
-}
 function bars(sig){ return sig>=75?"▂▄▆█":sig>=50?"▂▄▆ ":sig>=25?"▂▄  ":"▂   "; }
 function render(s) {
   const wifi = s.wifi ? `${esc(s.wifi.ssid)} <span class="bars">${bars(s.wifi.signal)} ${s.wifi.signal}%</span>` : "Not connected";
@@ -915,12 +921,11 @@ function render(s) {
     const st = p.status || {};
     const bt = p.bluetooth === "connected" ? "ok" : (p.bluetooth === "connecting" ? "warn" : "bad");
     return `<div class="printer"><div class="row" style="justify-content:space-between"><strong>${esc(p.name)}</strong>
-      <span class="pill ${esc(st.state)}">${esc(st.text)}</span></div>
-      <div class="ip" style="margin:6px 0">${esc(p.address) || "waiting for an address…"}</div>
-      <dl class="kv"><dt>Address</dt><dd>${addrMode(p)}</dd><dt>Bluetooth</dt><dd><span class="pill ${bt}">${esc(p.bluetooth)}</span></dd>
+      <span class="pill ${bt}" title="Bluetooth link to the printer">${esc(p.bluetooth)}</span></div>
+      <dl class="kv" style="margin-top:8px"><dt>Address</dt><dd class="mono">${esc(p.address) || "waiting for an address…"}</dd>
       <dt>Device</dt><dd class="mono">${esc(p.device)}</dd>
       <dt>CUPS</dt><dd class="mono">socket://${esc(p.local||"127.0.0.1")}:9100</dd>
-      <dt>Status</dt><dd class="mono"><small>${esc(st.raw)}</small></dd></dl></div>`;
+      <dt>Status</dt><dd><span class="pill ${esc(st.state)}" title="${esc(st.raw)}">${esc(st.text)}</span></dd></dl></div>`;
   }).join("");
   $("saved").innerHTML = s.saved.length ? s.saved.map(n => `<tr><td><strong>${esc(n.name)}</strong>
       ${n.active?'<span class="pill ok">in use</span>':""}</td>
@@ -934,10 +939,22 @@ function render(s) {
   }
 }
 async function refresh() {
-  try { const r = await fetch("/api/status", {credentials:"same-origin"});
-        if (r.status === 401) return location.reload();
-        render(await r.json()); } catch (e) {}
+  try {
+    const r = await fetch("/api/status?t=" + Date.now(), {credentials:"same-origin", cache:"no-store"});
+    if (r.status === 401) return location.reload();
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    render(await r.json());
+    $("updated").className = "sub";
+    $("updated").textContent = "Updated " + new Date().toLocaleTimeString();
+  } catch (e) {
+    $("updated").className = "msg warn";
+    $("updated").textContent = "Can't reach the Pi right now. The details below may be out of date.";
+  }
 }
+// Refresh straight away when the page comes back into view: switching tabs,
+// unlocking a phone, or the browser restoring it from its back/forward cache.
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
+window.addEventListener("pageshow", e => { if (e.persisted) refresh(); });
 $("scan").onclick = async () => {
   $("scan").disabled = true; $("scan-note").textContent = "Scanning… (about 10 seconds)";
   try {

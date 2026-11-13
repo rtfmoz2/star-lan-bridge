@@ -11,10 +11,38 @@ ExecStart=/usr/bin/python3 /opt/star-lan-bridge/star_admin.py
 # Root: it writes NetworkManager connection files and binds port 80.
 Restart=always
 RestartSec=3
+# --- Sandbox (see docs/SECURITY.md) ---
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+UMask=0077
+# Network: only this host and private (venue LAN) addresses, never the internet.
+IPAddressDeny=any
+IPAddressAllow=localhost link-local multicast 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+# DHCP (printer leases) uses the unspecified and limited-broadcast addresses.
+IPAddressAllow=0.0.0.0/32 255.255.255.255/32
+# Root, but only with the capabilities it needs: port 80, adding printer
+# addresses (ip addr) and DHCP's raw sockets (udhcpc).
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_ADMIN CAP_NET_RAW
+PrivateDevices=yes
+# AF_PACKET: udhcpc; AF_NETLINK: ip addr; AF_BLUETOOTH: rfcomm link state.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK AF_PACKET AF_BLUETOOTH
 # Files it writes: new Wi-Fi profiles, its password file and printer lease records.
 ReadWritePaths=/etc/NetworkManager/system-connections /etc/star-admin
 # Printer DHCP leases (read by the bridge); kept across restarts so addresses stay put.

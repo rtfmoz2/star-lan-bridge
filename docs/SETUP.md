@@ -20,8 +20,10 @@ for i in $(seq 1 254); do ping -c1 -W 300 192.168.1.$i >/dev/null 2>&1 & done; w
 arp -an | grep -iE 'b8:27:eb|dc:a6:32|e4:5f:01|d8:3a:dd|2c:cf:67|28:cd:c1|88:a2:9e'
 ```
 
-Give the Pi a **DHCP reservation** on your router. POS apps store the printer
-by IP address.
+POS apps store the printer by IP address, so keep the Pi's address stable. With
+**one printer per Pi**, give the Pi a DHCP reservation on the router. With
+**several printers**, don't reserve the Pi's MAC on routers like UniFi; see
+[ADMIN.md, Router reservations](ADMIN.md#router-reservations).
 
 ## 2. Wi-Fi (if not set in Imager)
 
@@ -179,9 +181,10 @@ Steps:
    python3 tools/star_probe.py status --host <printer-2-address>
    ```
 
-6. **Reserve the addresses on the venue's router** if you can (both the Pi's
-   and each printer's lease). Leases are stable, but a reservation makes sure
-   the POS never has to find a printer again.
+6. **Leave the leases as plain DHCP.** They stay stable by themselves. Don't
+   add a fixed IP for the Pi's MAC on UniFi or other routers that reserve by
+   MAC: it can apply to every printer's lease, because they all use that MAC.
+   See [ADMIN.md, Router reservations](ADMIN.md#router-reservations).
 
 If a router hands out leases by MAC address only, every client ID gets the
 Pi's own address. The page then shows printer 2 with the same address as

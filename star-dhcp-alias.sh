@@ -14,6 +14,7 @@
 #
 # Nothing else is configured: no routes, DNS or hostname changes.
 
+umask 022   # the bridge (another user) reads the lease record
 DIR="${LEASE_DIR:-/run/star-lan-bridge}"
 case "$PRINTER" in
     ''|*[!A-Za-z0-9_.-]*) logger -t star-dhcp "bad PRINTER name"; exit 1 ;;

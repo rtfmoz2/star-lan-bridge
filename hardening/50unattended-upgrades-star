@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: MIT
+// Installed to /etc/apt/apt.conf.d/52unattended-upgrades-star by scripts/harden.sh.
+// Debian SECURITY updates only, every day; reboot at 03:30 only when an update
+// needs it. "#clear" drops the origins Debian's default 50unattended-upgrades
+// adds (including stable point releases), so only the security archive is used.
+// Raspberry Pi archive packages (kernel, firmware) stay manual: apt full-upgrade.
+#clear Unattended-Upgrade::Origins-Pattern;
+Unattended-Upgrade::Origins-Pattern {
+        "origin=Debian,codename=${distro_codename}-security,label=Debian-Security";
+};
+Unattended-Upgrade::Remove-Unused-Dependencies "true";
+Unattended-Upgrade::Automatic-Reboot "true";
+Unattended-Upgrade::Automatic-Reboot-Time "03:30";

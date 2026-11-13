@@ -83,9 +83,14 @@ and give each printer its own address; see [SETUP.md §7](docs/SETUP.md#7-severa
   adding more printers
 * **[docs/ADMIN.md](docs/ADMIN.md)**: the web page (join Wi-Fi, see addresses),
   how printers get DHCP addresses, and its security
+* **[docs/SECURITY.md](docs/SECURITY.md)**: threat model, how the bridge handles
+  hostile data, the service sandbox, firewall and Pi lockdown (`scripts/harden.sh`)
 * **[docs/PROTOCOL.md](docs/PROTOCOL.md)**: Star Discovery (UDP 22222), ASB
   status frames, the 9100 and 9101 channels, and why `ESC RS a 0` is
   stripped, with each fact tagged by source
+* **[docs/LOGS.md](docs/LOGS.md)**: reading the logs over SSH: where each part
+  logs, everyday recipes, logs from before a power cut, copying them to a
+  laptop, and what the important lines mean
 * **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)**: duplicate prints,
   "not connected", slow CUPS jobs, Bluetooth link and pairing errors, a second
   printer that doesn't show up, paper-out status
@@ -105,6 +110,8 @@ avahi/star-admin.service      Bonjour advert for the admin page
 systemd/rfcomm-printer.service    template; install.sh fills in MAC and channel
 scripts/install.sh            install bridge + rfcomm binding, optionally repoint CUPS
 scripts/install-admin.sh      install the web admin page
+scripts/harden.sh             lock the Pi down for deployment (firewall, SSH, CUPS, updates)
+hardening/                    firewall, SSH and update settings used by harden.sh
 scripts/setup-cups.sh         optional: CUPS + Star driver build + shared queue
 scripts/uninstall.sh
 tests/                        unit tests: python3 -m unittest discover tests
@@ -127,6 +134,9 @@ docs/                         setup, protocol and troubleshooting docs
   (see [ADMIN.md](docs/ADMIN.md#how-printer-addresses-work)).
 * **Plain-HTTP admin page.** Use it on the venue's staff network or a cable,
   not on open guest Wi-Fi.
+* **Anyone on the staff network can print.** As with a real Star LAN printer,
+  that includes opening a cash drawer. The staff Wi-Fi password is the
+  boundary (see [SECURITY.md](docs/SECURITY.md)).
 * **Identity.** The bridge always reports a TSP143IIILAN. By default it uses
   the host's own MAC; set `mac` per printer to keep printers distinct.
 * **Byte filtering.** The bridge removes the exact bytes `1B 1E 61 00` from

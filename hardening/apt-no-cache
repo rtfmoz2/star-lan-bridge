@@ -1,0 +1,6 @@
+// SPDX-License-Identifier: MIT
+// /etc/apt/apt.conf.d/02-star-no-cache, installed by scripts/harden.sh.
+// Delete downloaded .deb files after installing them, so updates don't leave
+// hundreds of megabytes behind on the SD card.
+Binary::apt::APT::Keep-Downloaded-Packages "false";
+APT::Keep-Downloaded-Packages "false";

@@ -81,6 +81,33 @@ restarts while printer 1 used the Pi's own `192.168.1.134`.
 The **Printers** section then shows printer 2 with the same address as printer 1,
 and that network can run only one printer per Pi.
 
+## Router reservations
+
+**One printer per Pi** (only `address = auto`): a DHCP reservation for the
+Pi's MAC address on the venue router is fine and recommended. The POS stores
+the printer by IP, and a reservation keeps it fixed.
+
+**More than one printer per Pi** (any `address = dhcp`): **don't** reserve an
+address for the Pi's MAC on routers whose reservations work by MAC address.
+That includes UniFi ("Fixed IP Address" on the client) and most home and small
+business routers. Every lease the Pi asks for uses that same MAC, so the
+reservation can apply to all of them: printer 2's lease may then get the Pi's
+own reserved address, or keep being refused, and printer 2 disappears.
+
+Leave those leases as ordinary DHCP instead. They are already stable: each
+printer asks with a fixed client ID, and the router keeps handing back the same
+address (UniFi kept 192.168.1.140 across reboots and restarts). Only DHCP
+servers that can reserve by **client identifier** (option 61) can pin each
+printer separately, for example ISC/Kea, dnsmasq's `id:` host entries or Windows
+Server DHCP. There, reserve the Pi's MAC for the Pi and each printer's client
+ID for that printer: type 0 followed by the text
+`star-lan-bridge:<Pi MAC, lowercase, no colons>:<printer name>`, for example
+`star-lan-bridge:dca6322592a3:TSP143-2`.
+
+If an address does change, for example after a long power-off past the lease
+time (12 hours on UniFi) or on a new network, the admin page shows the new one.
+Search for printers again in the POS.
+
 ## Security
 
 * The admin password is stored as a salted PBKDF2-SHA256 hash
@@ -112,4 +139,5 @@ and that network can run only one printer per Pi.
 | `/etc/NetworkManager/system-connections/star-admin-*.nmconnection` | Networks added from the page |
 
 Logs: `journalctl -u star-admin` (page and DHCP management) and
-`journalctl -t star-dhcp` (each lease and renewal).
+`journalctl -t star-dhcp` (each lease and renewal). See [LOGS.md](LOGS.md) for
+reading them together with the bridge's, and from before a reboot.

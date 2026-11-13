@@ -1,10 +1,14 @@
 # Troubleshooting
 
-Start with the bridge log. It records every discovery reply, print job and link change:
+Start with the bridge log. It records every discovery reply, print job and link
+change. [LOGS.md](LOGS.md) covers every log on the Pi and how to read it.
 
 ```bash
 journalctl -u star-lan-bridge -f
 ```
+
+Logs survive reboots and power cuts (capped at 100 MB and one month). After a
+power cut, `journalctl -u star-lan-bridge -b -1` shows the boot before it.
 
 Every line names the printer it's about, e.g. `[TSP143-2] 9100: connection from
 192.168.1.141:45328` (in single-printer mode the name is `printer`).
@@ -27,7 +31,9 @@ query to the saved IP, and don't make a TCP connection between jobs. A failed
 earlier job can leave the label stuck until the app checks again. Open the
 printer settings or search again, then confirm the log shows
 `discovery: answered <pos-ip>`. If the Pi's IP has changed, the app is querying
-the old address: add a DHCP reservation.
+the old address: search for printers again. To stop it changing, see
+[ADMIN.md, Router reservations](ADMIN.md#router-reservations); with several
+printers, don't reserve the Pi's MAC on UniFi.
 
 ## Printing through CUPS takes ~50 seconds
 
@@ -100,8 +106,13 @@ bluetoothctl info <MAC> | grep -E "Paired|Bonded|Trusted"     # all three: yes
 * From another machine, `python3 tools/star_probe.py discover` should get one
   reply per printer, and `discover --host <address>` only that printer.
 * Has the address changed? After a long power-off or on a new network, a
-  printer may get a different lease. The admin page shows the current one.
-  Reserve it on the router so the POS never has to search again.
+  printer may get a different lease. The admin page shows the current one;
+  search again in the POS.
+* Is there a fixed IP for the Pi's MAC on the router? On UniFi and other
+  routers that reserve by MAC, it can apply to printer 2's lease too, because
+  the same MAC is used. Remove it and restart star-admin
+  (`sudo systemctl restart star-admin`). See
+  [ADMIN.md, Router reservations](ADMIN.md#router-reservations).
 
 ## The POS reports the printer is out of paper (or every job "succeeds" but nothing prints)
 
