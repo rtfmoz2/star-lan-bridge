@@ -930,7 +930,7 @@ SSHCTL_HTML = """
   <label class="check" style="font-weight:600;font-size:1.05rem">
     <input type="checkbox" id="ssh" disabled> Allow SSH logins
   </label>
-  <p id="state" class="sub" role="status">Checking…</p>
+  <p role="status" style="font-weight:600">SSH Connections: <span id="state">Checking…</span></p>
   <p><small>Turning SSH off stops new logins now and after reboots; sessions already open stay
   connected until they end. To get SSH back without this page, put a file named <span class="mono">ssh</span>
   on the SD card's boot partition and restart the Pi.</small></p>
@@ -941,7 +941,8 @@ const H = {"Content-Type":"application/json","X-Star-Admin":"1"};
 const box = document.getElementById("ssh"), state = document.getElementById("state"), msg = document.getElementById("msg");
 function show(s) {
   box.checked = s.enabled; box.disabled = false;
-  state.textContent = s.running ? "SSH is on: new logins are accepted." : "SSH is off: new logins are refused.";
+  state.textContent = s.running ? "Accepted" : "Denied";
+  state.style.color = s.running ? "var(--ok)" : "var(--bad)";
 }
 async function load() {
   const r = await fetch("/api/ssh?t=" + Date.now(), {credentials:"same-origin", cache:"no-store"});
