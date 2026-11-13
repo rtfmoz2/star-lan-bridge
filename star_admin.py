@@ -70,9 +70,10 @@ MIN_PASSWORD = 10
 # ---------------------------------------------------------------------------
 # Small helpers
 # ---------------------------------------------------------------------------
-def run(args: list[str], timeout: float = 20) -> subprocess.CompletedProcess:
+def run(args: list[str], timeout: float = 20, env: dict | None = None) -> subprocess.CompletedProcess:
     """Run a command without a shell. Arguments are never interpolated into a shell."""
-    return subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+    return subprocess.run(args, capture_output=True, text=True, timeout=timeout,
+                          env={**os.environ, **env} if env else None)
 
 
 def nm_split(line: str) -> list[str]:
@@ -604,6 +605,44 @@ DHCP = DhcpManager()
 
 
 # ---------------------------------------------------------------------------
+# SSH on/off (hidden /sshctl page)
+# ---------------------------------------------------------------------------
+# Debian runs sshd as ssh.service; ssh.socket is the socket-activated
+# alternative, kept off so it can't bring SSH back on its own.
+SSH_SERVICE, SSH_SOCKET = "ssh.service", "ssh.socket"
+LOGIN_TARGETS = ("/", "/sshctl")
+
+
+def ssh_state() -> dict:
+    def q(cmd, unit):
+        return run(["systemctl", cmd, unit]).stdout.strip()
+    enabled = q("is-enabled", SSH_SERVICE) == "enabled" or q("is-enabled", SSH_SOCKET) == "enabled"
+    running = q("is-active", SSH_SERVICE) == "active" or q("is-active", SSH_SOCKET) == "active"
+    return {"enabled": enabled, "running": running}
+
+
+def apply_ssh(on: bool) -> dict:
+    """Turn new SSH logins on or off, now and at boot. Sessions already open
+    are not ended. Raspberry Pi OS also turns SSH on at boot if a file named
+    `ssh` is put on the boot partition (sshswitch.service): the way back in if
+    SSH is off and this page can't be reached."""
+    # Skip Debian's SysV init-script mirroring (systemd-sysv-install): it edits
+    # /etc/rc*.d, which is read-only in this service's sandbox, and those links
+    # are ignored anyway because ssh has a native systemd unit.
+    env = {"SYSTEMCTL_SKIP_SYSV": "1"}
+    if on:
+        r = run(["systemctl", "enable", "--now", SSH_SERVICE], timeout=30, env=env)
+    else:
+        run(["systemctl", "disable", "--now", SSH_SOCKET], timeout=30, env=env)
+        r = run(["systemctl", "disable", "--now", SSH_SERVICE], timeout=30, env=env)
+    if r.returncode != 0:
+        log.warning("ssh: systemctl failed: %s", (r.stderr or r.stdout).strip()[-300:])
+    state = ssh_state()
+    log.warning("ssh: now %s", "on" if state["running"] else "off")
+    return state
+
+
+# ---------------------------------------------------------------------------
 # HTTP
 # ---------------------------------------------------------------------------
 class Sessions:
@@ -719,6 +758,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not self.authed():
                 return self.json(401, {"error": "Sign in again."})
             return self.json(200, status())
+        # Not linked from anywhere; still needs the admin sign-in.
+        if path == "/sshctl":
+            if not load_auth():
+                return self.send(503, page_no_password().encode(), "text/html; charset=utf-8")
+            if not self.authed():
+                return self.send(200, page_login("", "/sshctl").encode(), "text/html; charset=utf-8")
+            return self.send(200, page_sshctl().encode(), "text/html; charset=utf-8")
+        if path == "/api/ssh":
+            if not self.authed():
+                return self.json(401, {"error": "Sign in again."})
+            return self.json(200, ssh_state())
         self.send(404, b"Not found", "text/plain")
 
     def do_POST(self):
@@ -741,6 +791,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self.join(data)
             if path == "/api/forget":
                 return self.forget(data)
+            if path == "/api/ssh":
+                return self.set_ssh(data, client)
             self.json(404, {"error": "Not found."})
         except ValueError as e:
             self.json(400, {"error": str(e)})
@@ -756,13 +808,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(429, page_login("Too many attempts. Wait five minutes and try again.").encode(),
                              "text/html; charset=utf-8")
         form = parse_qs(self.body().decode("utf-8", "replace"))
+        nxt = form.get("next", ["/"])[0]
+        nxt = nxt if nxt in LOGIN_TARGETS else "/"   # only our own pages: no open redirect
         if check_password(form.get("password", [""])[0], auth):
             tok = SESSIONS.new()
-            return self.redirect("/", {"Set-Cookie": f"star_admin={tok}; HttpOnly; SameSite=Strict; Path=/; "
+            return self.redirect(nxt, {"Set-Cookie": f"star_admin={tok}; HttpOnly; SameSite=Strict; Path=/; "
                                                      f"Max-Age={SESSION_TTL}"})
         SESSIONS.failed(client)
         time.sleep(1)
-        self.send(401, page_login("That password isn't right.").encode(), "text/html; charset=utf-8")
+        self.send(401, page_login("That password isn't right.", nxt).encode(), "text/html; charset=utf-8")
 
     def join(self, data: dict):
         ssid = validate_ssid(data.get("ssid", ""))
@@ -779,6 +833,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.json(200, {"ok": True, "state": "saved"})
         threading.Thread(target=join_worker, args=(ssid, conn_uuid, previous), daemon=True).start()
         self.json(200, {"ok": True, "state": "connecting"})
+
+    def set_ssh(self, data: dict, client: str):
+        if not isinstance(data.get("enabled"), bool):
+            raise ValueError("Send enabled: true or false.")
+        want = data["enabled"]
+        log.warning("ssh: %s requested by %s", "enable" if want else "disable", client)
+        state = apply_ssh(want)
+        if state["enabled"] != want or state["running"] != want:
+            return self.json(500, {"error": "SSH didn't change as requested; see the star-admin log.", **state})
+        self.json(200, state)
 
     def forget(self, data: dict):
         conn_uuid = str(data.get("uuid", ""))
@@ -840,15 +904,67 @@ def page_no_password() -> str:
 <p>Then reload this page.</p></div>""")
 
 
-def page_login(error: str) -> str:
+def page_login(error: str, next_path: str = "/") -> str:
     err = f'<div class="msg bad">{html.escape(error)}</div>' if error else ""
+    nxt = next_path if next_path in LOGIN_TARGETS else "/"
     return shell("Sign in · printer bridge", f"""
 <h1>Printer bridge</h1><p class="sub">{html.escape(socket.gethostname())}.local</p>
 <form class="card" method="post" action="/login">
+<input type="hidden" name="next" value="{html.escape(nxt)}">
 <label for="password">Admin password</label>
 <input id="password" name="password" type="password" autocomplete="current-password" required autofocus>
 <div class="row" style="margin-top:14px"><button type="submit">Sign in</button></div>{err}
 </form>""")
+
+
+def page_sshctl() -> str:
+    return shell("SSH access · printer bridge", SSHCTL_HTML.replace("{{HOST}}", html.escape(socket.gethostname())))
+
+
+SSHCTL_HTML = """
+<div class="row" style="justify-content:space-between">
+  <div><h1>SSH access</h1><p class="sub mono">{{HOST}}.local</p></div>
+  <a class="btn" href="/" style="text-decoration:none">Back</a>
+</div>
+<section class="card">
+  <label class="check" style="font-weight:600;font-size:1.05rem">
+    <input type="checkbox" id="ssh" disabled> Allow SSH logins
+  </label>
+  <p id="state" class="sub" role="status">Checking…</p>
+  <p><small>Turning SSH off stops new logins now and after reboots; sessions already open stay
+  connected until they end. To get SSH back without this page, put a file named <span class="mono">ssh</span>
+  on the SD card's boot partition and restart the Pi.</small></p>
+  <div id="msg"></div>
+</section>
+<script>
+const H = {"Content-Type":"application/json","X-Star-Admin":"1"};
+const box = document.getElementById("ssh"), state = document.getElementById("state"), msg = document.getElementById("msg");
+function show(s) {
+  box.checked = s.enabled; box.disabled = false;
+  state.textContent = s.running ? "SSH is on: new logins are accepted." : "SSH is off: new logins are refused.";
+}
+async function load() {
+  const r = await fetch("/api/ssh?t=" + Date.now(), {credentials:"same-origin", cache:"no-store"});
+  if (r.status === 401) return location.reload();
+  show(await r.json());
+}
+box.onchange = async () => {
+  const want = box.checked;
+  if (!want && !confirm("Turn SSH off? New SSH logins will be refused until you turn it back on here.")) {
+    box.checked = true; return;
+  }
+  box.disabled = true; msg.innerHTML = "";
+  try {
+    const r = await fetch("/api/ssh", {method:"POST", headers:H, credentials:"same-origin", body:JSON.stringify({enabled:want})});
+    if (r.status === 401) return location.reload();
+    const j = await r.json();
+    if (!r.ok) msg.innerHTML = '<div class="msg bad"></div>', msg.firstChild.textContent = j.error || ("Error " + r.status);
+    show(j.enabled === undefined ? {enabled:!want, running:!want} : j);
+  } catch (e) { msg.innerHTML = '<div class="msg bad">Couldn’t reach the Pi.</div>'; box.disabled = false; }
+};
+load();
+</script>
+"""
 
 
 def page_app() -> str:

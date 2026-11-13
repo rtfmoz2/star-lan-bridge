@@ -186,5 +186,16 @@ class AliasScriptTest(unittest.TestCase):
         self.assertNotEqual(rc, 0)
 
 
+class SshctlPageTest(unittest.TestCase):
+    def test_login_return_only_to_own_pages(self):
+        self.assertIn('name="next" value="/sshctl"', admin.page_login("", "/sshctl"))
+        for evil in ["https://evil.example/", "//evil.example", "/sshctl?x", "/api/ssh", ""]:
+            self.assertIn('name="next" value="/"', admin.page_login("", evil))
+
+    def test_page_is_not_linked_from_main_page(self):
+        self.assertNotIn("sshctl", admin.APP_HTML)
+        self.assertIn('id="ssh"', admin.SSHCTL_HTML)
+
+
 if __name__ == "__main__":
     unittest.main()
