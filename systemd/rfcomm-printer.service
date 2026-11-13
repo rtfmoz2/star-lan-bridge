@@ -1,0 +1,17 @@
+# Bind a paired Bluetooth SPP printer to /dev/rfcomm0 at boot.
+# scripts/install.sh replaces @PRINTER_MAC@ and @CHANNEL@ when it installs this file.
+# Find the channel with: sudo sdptool browse <MAC> | grep -A8 -i "Serial Port"
+[Unit]
+Description=Bind Bluetooth printer @PRINTER_MAC@ to /dev/rfcomm0
+After=bluetooth.service
+Requires=bluetooth.service
+Before=cups.service star-lan-bridge.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/rfcomm bind 0 @PRINTER_MAC@ @CHANNEL@
+ExecStop=/usr/bin/rfcomm release 0
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

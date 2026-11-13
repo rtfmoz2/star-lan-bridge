@@ -1,0 +1,25 @@
+# Star LAN printer emulation for a Bluetooth Star printer.
+# Installed to /etc/systemd/system/ by scripts/install.sh.
+[Unit]
+Description=Star LAN printer emulation (discovery UDP 22222, print TCP 9100, status TCP 9101) for a Bluetooth Star printer
+Documentation=https://github.com/<you>/star-lan-bridge
+After=network-online.target bluetooth.service rfcomm-printer.service
+Wants=network-online.target
+# The bridge needs /dev/rfcomm0, which rfcomm-printer.service creates.
+Requires=rfcomm-printer.service
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/star-lan-bridge/star_lan_bridge.py
+# Unprivileged system user; the dialout group grants access to /dev/rfcomm*.
+User=starbridge
+Group=dialout
+Restart=always
+RestartSec=3
+# Sandboxing: the bridge only needs the network and the RFCOMM device.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
