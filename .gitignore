@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.pcap
+*.pcap[0-9]*
+Star_CUPS_Driver-*
+.DS_Store
