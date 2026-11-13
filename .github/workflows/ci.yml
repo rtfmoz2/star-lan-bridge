@@ -1,0 +1,70 @@
+# SPDX-License-Identifier: MIT
+# Checks the code that can be checked without a Pi, Bluetooth or printers:
+# unit, protocol and fuzz tests on two Python versions, shell scripts,
+# the firewall ruleset and the systemd units.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: tests (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.13 is what Raspberry Pi OS Trixie ships; 3.11 covers Bookworm.
+        python: ["3.11", "3.13"]
+    env:
+      # Shared runners can be slow; stretch the fuzz tests' waits (tests/test_fuzz.py).
+      STAR_TEST_TIME_SCALE: "3"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Compile
+        run: python -m py_compile star_lan_bridge.py star_admin.py tools/star_probe.py
+      - name: Unit, protocol and fuzz tests
+        run: python -m unittest discover -v tests
+
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shell scripts (shellcheck)
+        run: |
+          shellcheck --version | head -2
+          shellcheck scripts/*.sh
+          shellcheck -s sh star-dhcp-alias.sh
+      - name: Install nftables and bluez (for the checks below)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq nftables bluez >/dev/null
+      - name: Firewall ruleset syntax (nft -c)
+        run: sudo nft -c -f hardening/nftables.conf
+      - name: systemd units (systemd-analyze verify)
+        run: |
+          set -euo pipefail
+          d=$(mktemp -d)
+          cp systemd/star-lan-bridge.service systemd/star-admin.service "$d/"
+          # rfcomm-printer.service is a template; fill it in as install.sh does.
+          sed -e 's/@PRINTER_MAC@/00:11:62:00:00:01/g' -e 's/@CHANNEL@/1/g' \
+              systemd/rfcomm-printer.service > "$d/rfcomm-printer.service"
+          # The units run files installed under /opt; stand in for them here.
+          sudo install -d /opt/star-lan-bridge
+          sudo install -m 755 star_lan_bridge.py star_admin.py /opt/star-lan-bridge/
+          SYSTEMD_UNIT_PATH="$d:" systemd-analyze verify --man=no \
+              "$d/star-lan-bridge.service" "$d/star-admin.service" "$d/rfcomm-printer.service"

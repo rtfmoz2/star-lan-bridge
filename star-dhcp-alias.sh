@@ -14,6 +14,10 @@
 #
 # Nothing else is configured: no routes, DNS or hostname changes.
 
+# $ip, $mask, $lease, $router, $serverid and $interface come from udhcpc's
+# environment, not from this script.
+# shellcheck disable=SC2154
+
 umask 022   # the bridge (another user) reads the lease record
 DIR="${LEASE_DIR:-/run/star-lan-bridge}"
 case "$PRINTER" in

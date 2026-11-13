@@ -27,6 +27,15 @@ spec.loader.exec_module(bridge)
 D = bridge.ASB_DISABLE
 HOST = "127.0.0.1"
 
+# Shared CI machines can be much slower than a laptop. CI sets
+# STAR_TEST_TIME_SCALE (e.g. 3) to stretch every wait and time limit here;
+# what's being checked stays the same.
+SCALE = float(os.environ.get("STAR_TEST_TIME_SCALE", "1"))
+
+
+def T(seconds: float) -> float:
+    return seconds * SCALE
+
 
 def free_port() -> int:
     s = socket.socket()
@@ -84,13 +93,14 @@ class BridgeHarness(unittest.TestCase):
         cls.station = bridge.Station("fuzz", cls.printer.path, address=HOST)
         cls.thread = threading.Thread(target=bridge.serve, args=(cls.station,), daemon=True)
         cls.thread.start()
-        time.sleep(0.5)
+        time.sleep(T(0.5))
         cls.printer.take()  # discard ASB enable / status request sent on connect
 
     def setUp(self):
         self.assertTrue(self.thread.is_alive(), "bridge loop died")
 
     def wait_received(self, n: int, timeout: float = 5.0) -> bytes:
+        timeout = T(timeout)
         out, end = bytearray(), time.time() + timeout
         while len(out) < n and time.time() < end:
             out += self.printer.take()
@@ -99,16 +109,16 @@ class BridgeHarness(unittest.TestCase):
         return bytes(out + self.printer.take())
 
     def job(self, data: bytes, chunk: int = 1500) -> socket.socket:
-        c = socket.create_connection((HOST, self.print_port), timeout=5)
+        c = socket.create_connection((HOST, self.print_port), timeout=T(5))
         for i in range(0, len(data), chunk):
             c.sendall(data[i:i + chunk])
         return c
 
     def status(self, payload: bytes = b"\x32" + b"\0" * 50) -> bytes:
-        c = socket.create_connection((HOST, self.status_port), timeout=5)
+        c = socket.create_connection((HOST, self.status_port), timeout=T(5))
         c.sendall(payload)
         out = b""
-        c.settimeout(2)
+        c.settimeout(T(2))
         try:
             while True:
                 x = c.recv(64)
@@ -145,15 +155,15 @@ class PrintChannelFuzz(BridgeHarness):
             time.sleep(0.05)
 
     def test_idle_client_is_dropped_and_next_client_served(self):
-        idle = socket.create_connection((HOST, self.print_port), timeout=5)
+        idle = socket.create_connection((HOST, self.print_port), timeout=T(5))
         idle.recv(11)  # greeting frame
-        time.sleep(0.3)
-        nxt = socket.create_connection((HOST, self.print_port), timeout=5)  # waits in backlog
+        time.sleep(T(0.3))
+        nxt = socket.create_connection((HOST, self.print_port), timeout=T(5))  # waits in backlog
         nxt.sendall(b"HELLO")
         nxt.shutdown(socket.SHUT_WR)
         got = self.wait_received(5, timeout=6)
         self.assertIn(b"HELLO", got)
-        idle.settimeout(1)
+        idle.settimeout(T(1))
         try:
             leftover = idle.recv(64)
         except ConnectionResetError:
@@ -163,7 +173,7 @@ class PrintChannelFuzz(BridgeHarness):
         nxt.close()
 
     def test_oversized_job_is_cut_off(self):
-        c = socket.create_connection((HOST, self.print_port), timeout=5)
+        c = socket.create_connection((HOST, self.print_port), timeout=T(5))
         c.recv(11)
         sent = 0
         try:
@@ -183,7 +193,7 @@ class PrintChannelFuzz(BridgeHarness):
 
     def test_half_open_and_reset_connections(self):
         for _ in range(30):
-            c = socket.create_connection((HOST, self.print_port), timeout=5)
+            c = socket.create_connection((HOST, self.print_port), timeout=T(5))
             c.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, b"\x01\x00\x00\x00\x00\x00\x00\x00")
             c.close()  # RST
         c = self.job(b"still-alive")
@@ -200,10 +210,10 @@ class StatusChannelFuzz(BridgeHarness):
         self.assertEqual(len(self.status()), 22)
 
     def test_silent_clients_do_not_stall(self):
-        hogs = [socket.create_connection((HOST, self.status_port), timeout=5) for _ in range(40)]
+        hogs = [socket.create_connection((HOST, self.status_port), timeout=T(5)) for _ in range(40)]
         t0 = time.time()
         self.assertEqual(len(self.status()), 22)
-        self.assertLess(time.time() - t0, 1.5, "silent status clients stalled the bridge")
+        self.assertLess(time.time() - t0, T(1.5), "silent status clients stalled the bridge")
         # and print data still flows while they hang around
         c = self.job(b"through-the-crowd")
         c.shutdown(socket.SHUT_WR)
@@ -216,9 +226,9 @@ class StatusChannelFuzz(BridgeHarness):
 class PrinterSideFuzz(BridgeHarness):
     def test_garbage_from_printer_then_valid_frame(self):
         self.printer.send(os.urandom(20000))
-        time.sleep(0.3)
+        time.sleep(T(0.3))
         self.printer.send(bytes.fromhex("230602000000000200"))  # valid frame: ETB executed, counter 1
-        time.sleep(0.3)
+        time.sleep(T(0.3))
         out = self.status()
         self.assertEqual(len(out), 22)
         self.assertTrue(self.thread.is_alive())
@@ -232,7 +242,7 @@ class DiscoveryFuzz(unittest.TestCase):
         st = bridge.Station("d", "/dev/null", address=HOST)
         t = threading.Thread(target=bridge.discovery_thread, args=([st], ["lo0", "lo"]), daemon=True)
         t.start()
-        time.sleep(0.3)
+        time.sleep(T(0.3))
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         for i in range(500):
             junk = os.urandom(random.randint(0, 1400))
@@ -240,7 +250,7 @@ class DiscoveryFuzz(unittest.TestCase):
                 junk = b"STR_BCAST" + junk
             s.sendto(junk, (HOST, port))
         s.close()
-        time.sleep(0.5)
+        time.sleep(T(0.5))
         self.assertTrue(t.is_alive())
 
 

@@ -115,8 +115,28 @@ hardening/                    firewall, SSH and update settings used by harden.s
 scripts/setup-cups.sh         optional: CUPS + Star driver build + shared queue
 scripts/uninstall.sh
 tests/                        unit tests: python3 -m unittest discover tests
+.github/workflows/ci.yml      CI on every pull request (see below)
 docs/                         setup, protocol and troubleshooting docs
 ```
+
+## Tests and CI
+
+```bash
+python3 -m unittest discover tests        # unit, protocol and fuzz tests; no Pi or printer needed
+```
+
+GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs on every
+pull request and on pushes to `main`:
+
+* **tests:** everything in `tests/` on Python 3.11 and 3.13 (Raspberry Pi OS
+  Bookworm and Trixie), including the fuzz tests, which drive the real bridge
+  loop against a fake printer. CI sets `STAR_TEST_TIME_SCALE=3` to stretch their
+  waits on slow shared runners.
+* **lint:** `shellcheck` on every script, `nft -c` on the firewall ruleset, and
+  `systemd-analyze verify` on the unit files.
+
+CI can't exercise Bluetooth, real printers, the POS or Wi-Fi. Those still need
+checking on a Pi (see [docs/SETUP.md](docs/SETUP.md)).
 
 ## Limitations
 

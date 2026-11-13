@@ -248,7 +248,7 @@ class PrinterLinkTest(unittest.TestCase):
         t0 = bridge.time.time()
         self.assertFalse(p.write(b"\x1b\x06\x01"))
         self.assertFalse(p.write(b"x", wait=0.6))
-        self.assertLess(bridge.time.time() - t0, 3)
+        self.assertLess(bridge.time.time() - t0, 3 * float(os.environ.get("STAR_TEST_TIME_SCALE", "1")))
 
 
 if __name__ == "__main__":
