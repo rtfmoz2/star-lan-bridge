@@ -62,11 +62,14 @@ from __future__ import annotations
 import argparse
 import configparser
 import fcntl
+import ipaddress
 import logging
 import os
+import re
 import select
 import socket
 import struct
+import subprocess
 import threading
 import time
 import tty
@@ -167,6 +170,9 @@ class AsbDisableFilter:
         out, self.hold = self.hold, b""
         return out
 
+
+# A print job that arrives while the printer link is down waits this long for it.
+JOB_LINK_WAIT = 15.0
 
 # Linux ioctl numbers for reading an interface's IPv4 address and netmask.
 SIOCGIFADDR = 0x8915
@@ -337,33 +343,104 @@ class Station:
         return ip, mask, self.mac or mac, gw
 
 
-def load_config(path: str) -> list[Station]:
-    """Read [printer:NAME] sections from an INI file (see examples/star-lan-bridge.conf)."""
+LEASE_DIR = "/run/star-lan-bridge"   # star-admin writes one lease-<NAME> file per DHCP printer
+
+
+def default_route_iface() -> str | None:
+    """Interface carrying the IPv4 default route (lowest metric), from /proc/net/route."""
+    best = None
+    try:
+        with open("/proc/net/route") as f:
+            next(f)
+            for line in f:
+                p = line.split()
+                if len(p) > 6 and p[1] == "00000000":
+                    metric = int(p[6])
+                    if best is None or metric < best[1]:
+                        best = (p[0], metric)
+    except (OSError, ValueError):
+        pass
+    return best[0] if best else None
+
+
+def read_lease(name: str, lease_dir: str = LEASE_DIR) -> str | None:
+    """IPv4 address from a printer's DHCP lease file (written by star-admin), or None."""
+    try:
+        with open(os.path.join(lease_dir, f"lease-{name}")) as f:
+            for line in f:
+                key, _, value = line.strip().partition("=")
+                if key == "ip":
+                    socket.inet_aton(value)
+                    return value
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def resolve_address(name: str, value: str, lease_dir: str = LEASE_DIR) -> str | None:
+    """Turn a config `address` into an IPv4 address.
+
+      auto   the host's own DHCP address on the default-route interface
+      dhcp   this printer's own DHCP lease, kept by star-admin
+      a.b.c.d  used as given
+    Returns None if the address isn't known yet (no network, no lease).
+    """
+    v = value.strip().lower()
+    if v == "auto":
+        dev = default_route_iface()
+        info = iface_info(dev) if dev else None
+        return socket.inet_ntoa(info[0]) if info else None
+    if v == "dhcp":
+        return read_lease(name, lease_dir)
+    socket.inet_aton(value)  # raises on a malformed address
+    return value
+
+
+def read_printer_config(path: str) -> list[dict]:
+    """[printer:NAME] sections as dicts, without resolving addresses."""
     cp = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
     if not cp.read(path):
         raise FileNotFoundError(path)
-    stations, seen = [], set()
+    out = []
     for section in cp.sections():
         if not section.startswith("printer:"):
             continue
         name = section.split(":", 1)[1].strip() or section
+        if not re.fullmatch(r"[A-Za-z0-9_.-]{1,32}", name):
+            raise ValueError(f"[{section}] printer names use letters, digits, '.', '_' or '-' (max 32)")
         s = cp[section]
-        device = s.get("device")
-        address = s.get("address")
-        if not device or not address:
+        if not s.get("device") or not s.get("address"):
             raise ValueError(f"[{section}] needs both 'device' and 'address'")
-        socket.inet_aton(address)  # raises on a malformed address
         local = s.get("local")
         if local:
             socket.inet_aton(local)
-        for a in [address] + ([local] if local else []):
-            if a in seen:
-                raise ValueError(f"[{section}] address {a} is used by another printer")
-            seen.add(a)
-        mac = parse_mac(s["mac"]) if s.get("mac") else None
-        stations.append(Station(name, device, address, local, mac))
-    if not stations:
+        out.append({"name": name, "device": s["device"], "address": s["address"].strip(),
+                    "local": local, "mac": s.get("mac")})
+    if not out:
         raise ValueError(f"{path}: no [printer:NAME] sections")
+    return out
+
+
+def load_config(path: str, lease_dir: str = LEASE_DIR) -> list[Station]:
+    """Build one Station per printer whose address is known right now.
+
+    A printer whose address can't be resolved yet (`dhcp` before its first
+    lease, `auto` with no network) is skipped with a warning; star-admin
+    restarts the bridge when the address appears.
+    """
+    stations, seen = [], set()
+    for p in read_printer_config(path):
+        address = resolve_address(p["name"], p["address"], lease_dir)
+        if address is None:
+            log.warning("[%s] no address yet (address = %s); not serving this printer until it has one",
+                        p["name"], p["address"])
+            continue
+        for a in [address] + ([p["local"]] if p["local"] else []):
+            if a in seen:
+                raise ValueError(f"[printer:{p['name']}] address {a} is used by another printer")
+            seen.add(a)
+        mac = parse_mac(p["mac"]) if p["mac"] else None
+        stations.append(Station(p["name"], p["device"], address, p["local"], mac))
     return stations
 
 
@@ -385,6 +462,124 @@ def bind_retry(sock: socket.socket, addr: tuple, what: str, logger) -> None:
                 logger.warning("%s: can't bind %s:%d yet (%s); retrying every 5s", what, addr[0], addr[1], e)
                 warned = True
             time.sleep(5)
+
+
+# ---------------------------------------------------------------------------
+# Security: who may talk to the bridge, and how much
+# ---------------------------------------------------------------------------
+# Limits on the print channel. A Star receipt is tens of kilobytes; these are
+# generous for real jobs and stop a client from tying up a printer.
+JOB_IDLE_TIMEOUT = 60.0        # s without data from a 9100 client before it's closed
+JOB_MAX_SECONDS = 300.0        # longest a single 9100 connection may stay open
+JOB_MAX_BYTES = 8 * 1024 * 1024
+MAX_DISCOVERY_PACKET = 512     # real queries are 28 bytes
+RXBUF_LIMIT = 4096             # printer -> bridge bytes held while waiting for a whole frame
+STATUS_QUERY_WAIT = 0.5        # s a 9101 client gets to send its query before it's answered anyway
+STATUS_PENDING_MAX = 64        # 9101 connections waiting for a query at once
+
+
+class AccessPolicy:
+    """Decide whether a client address may use the bridge.
+
+    Allowed: loopback (CUPS on this host) and any address inside a subnet the
+    host itself is on, i.e. the venue network the Pi has joined. Everything
+    else (routed networks, VPNs, the internet) is refused. The host's subnets
+    are re-read every 30 s, so joining another network needs no restart.
+    """
+
+    REFRESH = 30.0
+
+    def __init__(self, extra: list[str] | None = None):
+        self.extra = [ipaddress.ip_network(n, strict=False) for n in (extra or [])]
+        self.nets: list = []
+        self.stamp = 0.0
+        self.lock = threading.Lock()
+
+    def local_networks(self) -> list:
+        nets = []
+        for name in os.listdir("/sys/class/net") if os.path.isdir("/sys/class/net") else []:
+            info = iface_info(name)
+            if info:
+                ip, mask = socket.inet_ntoa(info[0]), socket.inet_ntoa(info[1])
+                nets.append(ipaddress.ip_network(f"{ip}/{mask}", strict=False))
+        return nets
+
+    def allowed(self, addr: str) -> bool:
+        try:
+            ip = ipaddress.ip_address(addr)
+        except ValueError:
+            return False
+        if ip.is_loopback:
+            return True
+        if ip.is_multicast or ip.is_unspecified or ip.is_reserved or addr == "255.255.255.255":
+            return False
+        with self.lock:
+            if time.time() - self.stamp > self.REFRESH:
+                self.nets, self.stamp = self.local_networks(), time.time()
+            nets = self.nets + self.extra
+        for n in nets:
+            if ip in n and ip not in (n.network_address, n.broadcast_address):
+                return True
+        return False
+
+
+class RateLimiter:
+    """Token buckets: `rate` events per second per key, with bursts up to `burst`,
+    plus an overall cap across all keys."""
+
+    def __init__(self, rate: float, burst: float, total_rate: float):
+        self.rate, self.burst, self.total_rate = rate, burst, total_rate
+        self.buckets: dict[str, tuple[float, float]] = {}
+        self.total = (total_rate, time.time())
+        self.lock = threading.Lock()
+
+    def allow(self, key: str) -> bool:
+        now = time.time()
+        with self.lock:
+            tokens, last = self.total
+            tokens = min(self.total_rate, tokens + (now - last) * self.total_rate)
+            if tokens < 1:
+                self.total = (tokens, now)
+                return False
+            k_tokens, k_last = self.buckets.get(key, (self.burst, now))
+            k_tokens = min(self.burst, k_tokens + (now - k_last) * self.rate)
+            if k_tokens < 1:
+                self.buckets[key] = (k_tokens, now)
+                self.total = (tokens, now)
+                return False
+            self.buckets[key] = (k_tokens - 1, now)
+            self.total = (tokens - 1, now)
+            if len(self.buckets) > 4096:  # forget idle sources
+                self.buckets = {k: v for k, v in self.buckets.items() if now - v[1] < 60}
+            return True
+
+
+class LogThrottle:
+    """Log a given kind of event at most once per `every` seconds, with a count
+    of how many were suppressed, so a flood can't fill the journal."""
+
+    def __init__(self, every: float = 60.0):
+        self.every = every
+        self.seen: dict[str, list] = {}
+        self.lock = threading.Lock()
+
+    def __call__(self, logger, level: int, key: str, msg: str, *args):
+        now = time.time()
+        with self.lock:
+            last, skipped = self.seen.get(key, [0.0, 0])
+            if now - last < self.every:
+                self.seen[key] = [last, skipped + 1]
+                return
+            self.seen[key] = [now, 0]
+        if skipped:
+            msg += f" ({skipped} similar suppressed)"
+        logger.log(level, msg, *args)
+
+
+POLICY = AccessPolicy()
+THROTTLE = LogThrottle()
+DISCOVERY_LIMIT = RateLimiter(rate=5, burst=20, total_rate=100)    # queries per second
+STATUS_LIMIT = RateLimiter(rate=20, burst=40, total_rate=100)      # 9101 polls per second (StarIO polls ~5/s)
 
 
 def discovery_thread(stations: list[Station], ifaces: list[str]):
@@ -425,12 +620,24 @@ def discovery_thread(stations: list[Station], ifaces: list[str]):
             try:
                 data, addr = sock.recvfrom(2048)
             except OSError as e:
-                log.warning("discovery recv error: %s", e)
+                THROTTLE(log, logging.WARNING, "disc-recv", "discovery recv error: %s", e)
                 continue
-            if not is_discovery_query(data):
+            # Only answer devices on our own network, never a spoofed broadcast or
+            # outside source (that would make the bridge a traffic amplifier:
+            # 28 bytes in, 302 bytes out per printer).
+            if not POLICY.allowed(addr[0]) or addr[1] == 0:
+                THROTTLE(log, logging.WARNING, "disc-deny", "discovery: refused query from %s:%d (not on a local network)",
+                         addr[0], addr[1])
+                continue
+            if len(data) > MAX_DISCOVERY_PACKET or not is_discovery_query(data):
                 # Log unknown packets: useful when a new client speaks a variant.
-                log.info("discovery: ignored %d-byte UDP packet from %s:%d: %s",
+                THROTTLE(log, logging.INFO, f"disc-ignore-{addr[0]}",
+                         "discovery: ignored %d-byte UDP packet from %s:%d: %s",
                          len(data), addr[0], addr[1], data[:32].hex(" "))
+                continue
+            if not DISCOVERY_LIMIT.allow(addr[0]):
+                THROTTLE(log, logging.WARNING, f"disc-rate-{addr[0]}",
+                         "discovery: rate limit hit by %s; dropping queries", addr[0])
                 continue
             targets = [owner[sock]] if sock in owner else stations
             for st in targets:
@@ -443,8 +650,9 @@ def discovery_thread(stations: list[Station], ifaces: list[str]):
                 except OSError as e:
                     st.log.warning("discovery: reply to %s failed: %s", addr[0], e)
                     continue
-                st.log.info("discovery: answered %s:%d as TSP143IIILAN @ %s",
-                            addr[0], addr[1], socket.inet_ntoa(info[0]))
+                THROTTLE(st.log, logging.INFO, f"disc-ok-{st.name}-{addr[0]}",
+                         "discovery: answered %s:%d as TSP143IIILAN @ %s",
+                         addr[0], addr[1], socket.inet_ntoa(info[0]))
 
 
 # ---------------------------------------------------------------------------
@@ -480,11 +688,22 @@ def to_lan_asb(frame: bytes) -> bytes:
 class Printer:
     """Owns the RFCOMM TTY, reconnects on failure and caches the latest status.
 
-    Opening a bound /dev/rfcommN makes BlueZ connect to the printer, which
-    takes a moment and blocks; that's acceptable because nothing can print
-    until it finishes anyway. The link is then kept open between jobs, which
-    removes a several-second reconnect from the start of every receipt.
+    Connecting never blocks the event loop. A plain open() of /dev/rfcommN
+    waits in the kernel until the printer answers, forever if it is switched
+    off, which would freeze this printer's 9100/9101 service. So the TTY is
+    opened with O_NONBLOCK (that starts the Bluetooth connection and returns at
+    once) and the loop checks the link state on each tick: "connected" means
+    ready, "closed" or a 20-second timeout means the printer is unreachable, and
+    the next attempt waits with a growing back-off (10 s up to 60 s).
+
+    Once connected, the link is kept open between jobs, which removes a
+    several-second reconnect from the start of every receipt. While it is down,
+    9101 keeps answering from the cached status with the offline bit set, so a
+    POS shows the printer as offline instead of hanging.
     """
+
+    CONNECT_TIMEOUT = 20.0
+    MIN_BACKOFF, MAX_BACKOFF = 10.0, 60.0
 
     def __init__(self, path: str, logger=None):
         self.path = path
@@ -493,30 +712,88 @@ class Printer:
         self.rxbuf = b""                  # bytes from the printer not yet parsed into frames
         self.last_asb = IDLE_ASB_LAN      # most recent status, already in LAN format
         self.last_asb_time = 0.0          # when last_asb arrived (0 = never)
-        self.next_retry = 0.0             # earliest time to try reopening after a failure
+        self.next_retry = 0.0             # earliest time to start another connection attempt
+        self.backoff = self.MIN_BACKOFF
+        self.pending: int | None = None   # fd of a connection attempt in progress
+        self.pending_since = 0.0
+        self.down_logged = False          # log "unreachable" once per outage, not every retry
+        self.last_poll = 0.0              # when poll_status last asked the printer
+
+    @property
+    def connecting(self) -> bool:
+        return self.pending is not None
+
+    def link_state(self) -> str:
+        """Kernel RFCOMM state for this device: connected, config (connecting), closed, clean..."""
+        num = self.path.rsplit("rfcomm", 1)[-1]
+        try:
+            out = subprocess.run(["rfcomm", "show", num], capture_output=True, text=True, timeout=3).stdout
+        except (OSError, subprocess.TimeoutExpired):
+            return "unknown"
+        words = out.split("channel", 1)[-1].split()
+        return words[1] if len(words) > 1 else "unknown"
 
     def ensure_open(self) -> bool:
-        """Open the TTY if needed. Retries are rate-limited so a powered-off
-        printer doesn't stall the event loop on every iteration."""
+        """True if the link is up. Otherwise start or advance a non-blocking
+        connection attempt and return False; call again on the next tick."""
         if self.fd is not None:
             return True
+        if self.pending is not None:
+            self._check_pending()
+            return self.fd is not None
         if time.time() < self.next_retry:
             return False
         try:
-            fd = os.open(self.path, os.O_RDWR | os.O_NOCTTY)
-            tty.setraw(fd)           # no line discipline: Star data is binary
-            os.write(fd, ASB_ENABLE)  # we always want unsolicited status frames
-            self.fd = fd
-            self.rxbuf = b""
-            self.log.info("printer: connected via %s, ASB enabled", self.path)
-            return True
+            self.pending = os.open(self.path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+            self.pending_since = time.time()
         except OSError as e:
-            self.log.warning("printer: open %s failed: %s (retry in 10s)", self.path, e)
-            self.next_retry = time.time() + 10
+            self._attempt_failed(f"open {self.path}: {e}")
             return False
+        self._check_pending()
+        return self.fd is not None
+
+    def _check_pending(self):
+        state = self.link_state()
+        if state == "connected":
+            fd, self.pending = self.pending, None
+            try:
+                flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+                fcntl.fcntl(fd, fcntl.F_SETFL, flags & ~os.O_NONBLOCK)  # blocking writes from here on
+                tty.setraw(fd)                       # no line discipline: Star data is binary
+                os.write(fd, ASB_ENABLE)             # we always want unsolicited status frames
+                os.write(fd, STATUS_REQUEST)         # and a fresh status straight away
+            except OSError as e:
+                os.close(fd)
+                self._attempt_failed(f"setup: {e}")
+                return
+            self.fd, self.rxbuf = fd, b""
+            self.backoff, self.down_logged = self.MIN_BACKOFF, False
+            self.log.info("printer: connected via %s, ASB enabled", self.path)
+        elif state == "closed" or time.time() - self.pending_since > self.CONNECT_TIMEOUT:
+            try:
+                os.close(self.pending)
+            except OSError:
+                pass
+            self.pending = None
+            self._attempt_failed("printer didn't answer (off, asleep or out of range)")
+
+    def _attempt_failed(self, why: str):
+        self.next_retry = time.time() + self.backoff
+        if not self.down_logged:
+            self.log.warning("printer: unreachable: %s; retrying every %d-%ds",
+                             why, self.MIN_BACKOFF, self.MAX_BACKOFF)
+            self.down_logged = True
+        self.backoff = min(self.backoff * 2, self.MAX_BACKOFF)
+        self._mark_offline()
+
+    def _mark_offline(self):
+        """Keep the cached frame (and its ETB counter) but set the offline bit."""
+        f = bytearray(self.last_asb)
+        f[2] |= 0x08
+        self.last_asb = bytes(f)
 
     def close(self, why: str):
-        """Drop the link after an error; the next write or loop tick reopens it."""
+        """Drop the link after an error; the next loop tick reconnects."""
         if self.fd is not None:
             self.log.warning("printer: link closed (%s)", why)
             try:
@@ -525,10 +802,25 @@ class Printer:
                 pass
         self.fd = None
         self.next_retry = time.time() + 2
+        self._mark_offline()
 
-    def write(self, data: bytes) -> bool:
-        """Write everything (blocking). Returns False if the printer is unreachable."""
-        if not self.ensure_open():
+    def wait_open(self, timeout: float) -> bool:
+        """Block up to `timeout` s for the link (used when a print job arrives while it's down)."""
+        end = time.time() + timeout
+        while not self.ensure_open():
+            if time.time() >= end:
+                return False
+            if self.pending is None:
+                self.next_retry = min(self.next_retry, time.time())  # a job is waiting: retry now
+            time.sleep(0.25)
+        return True
+
+    def write(self, data: bytes, wait: float = 0.0) -> bool:
+        """Write everything (blocking). Returns False if the printer is unreachable.
+        With `wait`, first give a reconnecting printer that long to come up."""
+        if not data:
+            return self.fd is not None
+        if not (self.wait_open(wait) if wait else self.ensure_open()):
             return False
         try:
             view = memoryview(data)
@@ -556,6 +848,8 @@ class Printer:
             self.close("EOF")
             return []
         self.rxbuf += chunk
+        if len(self.rxbuf) > RXBUF_LIMIT:  # never more than a few frames' worth; resynchronise
+            self.rxbuf = self.rxbuf[-64:]
         frames = []
         while self.rxbuf:
             size = asb_size(self.rxbuf[0])
@@ -577,6 +871,11 @@ class Printer:
         Only called when no print client owns the link: injecting a command in
         the middle of a client's raster data would corrupt the job.
         """
+        # At most one request every 2 s, however many 9101 polls arrive, so a
+        # flood of polls can neither stall the loop nor spam the printer.
+        if time.time() - self.last_poll < 2.0:
+            return
+        self.last_poll = time.time()
         if not self.write(STATUS_REQUEST):
             return
         end = time.time() + timeout
@@ -608,23 +907,68 @@ def serve(station: Station):
     client: socket.socket | None = None   # the one active 9100 client, if any
     client_name = ""
     client_bytes = 0
+    client_start = client_last = 0.0
     filt = AsbDisableFilter()
+    # 9101 connections waiting for their query, handled without blocking:
+    # {socket: (client address, deadline)}. A silent client costs nothing.
+    status_pending: dict = {}
+
+    def answer_status(conn: socket.socket, addr, readable: bool):
+        """Read whatever query arrived (content isn't checked), send the latest
+        real status twice, close. Never blocks."""
+        query = b""
+        try:
+            if readable:
+                query = conn.recv(256)
+            # Between jobs the cache can be stale; refresh it if nothing owns the link.
+            if client is None and time.time() - printer.last_asb_time > 1.0:
+                printer.poll_status()
+            conn.send(printer.last_asb * 2)
+        except OSError:
+            pass
+        finally:
+            conn.close()
+        slog.debug("9101: %s query %d bytes -> %s", addr[0], len(query), printer.last_asb.hex(" "))
+
+    def drop_client(level: int, why: str):
+        nonlocal client
+        slog.log(level, "9100: %s %s after %d bytes", client_name, why, client_bytes)
+        try:
+            client.close()
+        except OSError:
+            pass
+        client = None
 
     printer.ensure_open()
     while True:
-        rlist = list(status_srvs)
+        rlist = list(status_srvs) + list(status_pending)
         # One print client at a time: while one is active, stop accepting new ones.
         rlist += [client] if client else print_srvs
         if printer.fd is not None:
             rlist.append(printer.fd)
         # Short timeout only while holding a partial ESC RS a 0 match, so it is
-        # flushed promptly if the client goes quiet; otherwise wake every 5 s to
+        # flushed promptly if the client goes quiet; 1 s while a client is
+        # connected (to enforce its time limits); otherwise wake every 5 s to
         # retry a lost printer link.
-        r, _, _ = select.select(rlist, [], [], 0.1 if filt.hold else 5.0)
+        timeout = 0.1 if (filt.hold or status_pending) else (0.5 if printer.connecting else (1.0 if client else 5.0))
+        r, _, _ = select.select(rlist, [], [], timeout)
+        if printer.fd is None:
+            printer.ensure_open()  # start or advance a non-blocking reconnect
+        now = time.time()
+        if client and now - client_last > JOB_IDLE_TIMEOUT:
+            drop_client(logging.WARNING, f"closed: no data for {JOB_IDLE_TIMEOUT:.0f} s")
+        elif client and now - client_start > JOB_MAX_SECONDS:
+            drop_client(logging.WARNING, f"closed: connected longer than {JOB_MAX_SECONDS:.0f} s")
+        # 9101 clients whose query arrived, or that stayed silent too long, get
+        # their answer now.
+        for conn in list(status_pending):
+            addr, deadline = status_pending[conn]
+            if conn in r or now >= deadline:
+                del status_pending[conn]
+                answer_status(conn, addr, conn in r)
         if not r:
             if filt.hold:  # idle with a held partial match: it wasn't ESC RS a 0
                 printer.write(filt.flush())
-            printer.ensure_open()
             continue
 
         # Printer -> client: relay every status frame to the active 9100 client.
@@ -634,20 +978,35 @@ def serve(station: Station):
                     try:
                         client.sendall(frame)
                     except OSError:
-                        pass  # client went away; noticed on its next recv
+                        pass  # client went away or stopped reading; noticed on its next recv
 
-        # New 9100 client: greet it with the current status, as a LAN printer does.
+        # New 9100 client: check it's allowed, then greet it with the current
+        # status, as a LAN printer does.
         for srv in print_srvs:
-            if srv in r and client is None:
-                client, addr = srv.accept()
-                client_name, client_bytes = f"{addr[0]}:{addr[1]}", 0
-                filt = AsbDisableFilter()
-                slog.info("9100: connection from %s", client_name)
-                if printer.ensure_open():
-                    try:
-                        client.sendall(printer.last_asb)
-                    except OSError:
-                        pass
+            if srv not in r or client is not None:
+                continue
+            try:
+                conn, addr = srv.accept()
+            except OSError as e:
+                THROTTLE(slog, logging.WARNING, "9100-accept", "9100: accept failed: %s", e)
+                continue
+            if not POLICY.allowed(addr[0]):
+                THROTTLE(slog, logging.WARNING, f"9100-deny-{addr[0]}",
+                         "9100: refused %s (not on a local network)", addr[0])
+                conn.close()
+                continue
+            conn.settimeout(2.0)  # sends to a client that stops reading can't block the loop
+            client, client_name, client_bytes = conn, f"{addr[0]}:{addr[1]}", 0
+            client_start = client_last = time.time()
+            filt = AsbDisableFilter()
+            slog.info("9100: connection from %s", client_name)
+            # Greet even while the link is down: the cached frame then has the
+            # offline bit set, so the client learns the printer isn't ready.
+            printer.ensure_open()
+            try:
+                client.sendall(printer.last_asb)
+            except OSError:
+                pass
 
         # Client -> printer: forward print data (minus ESC RS a 0).
         if client and client in r:
@@ -657,41 +1016,46 @@ def serve(station: Station):
                 data = b""
             if data:
                 client_bytes += len(data)
-                if not printer.write(filt.feed(data)):
-                    slog.warning("9100: printer unavailable, dropping %s", client_name)
-                    client.close()
-                    client = None
+                client_last = time.time()
+                if client_bytes > JOB_MAX_BYTES:
+                    drop_client(logging.WARNING, f"closed: job larger than {JOB_MAX_BYTES // 1048576} MB")
+                elif not printer.write(filt.feed(data), wait=JOB_LINK_WAIT):
+                    drop_client(logging.WARNING, "dropped: printer unavailable")
             else:
                 # Client closed its side: the job is complete.
                 printer.write(filt.flush())
                 slog.info("9100: %s finished, %d bytes received, %d ASB-disable cmd(s) stripped, "
                           "status now %s", client_name, client_bytes, filt.stripped,
                           printer.last_asb.hex(" "))
-                client.close()
+                try:
+                    client.close()
+                except OSError:
+                    pass
                 client = None
                 printer.write(ASB_ENABLE)  # belt and braces: make sure ASB is still on
 
-        # 9101 poll: read the query (content isn't checked), answer with the
-        # latest real status twice, close. StarIO polls this every ~200 ms
-        # during a job, so it must stay fast.
+        # 9101 poll: accept, then wait (without blocking the loop) for the
+        # client's query; it's answered above. StarIO polls this every ~200 ms
+        # during a job, so it must stay fast; floods are rate-limited.
         for srv in status_srvs:
             if srv not in r:
                 continue
-            conn, addr = srv.accept()
-            conn.settimeout(0.3)
             try:
-                query = conn.recv(64)
-            except OSError:
-                query = b""
-            # Between jobs the cache can be stale; refresh it if nothing owns the link.
-            if client is None and time.time() - printer.last_asb_time > 1.0:
-                printer.poll_status()
-            try:
-                conn.sendall(printer.last_asb * 2)
-            except OSError:
-                pass
-            conn.close()
-            slog.debug("9101: %s query %d bytes -> %s", addr[0], len(query), printer.last_asb.hex(" "))
+                conn, addr = srv.accept()
+            except OSError as e:
+                THROTTLE(slog, logging.WARNING, "9101-accept", "9101: accept failed: %s", e)
+                continue
+            if not POLICY.allowed(addr[0]):
+                THROTTLE(slog, logging.WARNING, f"9101-deny-{addr[0]}",
+                         "9101: refused %s (not on a local network)", addr[0])
+                conn.close()
+            elif not STATUS_LIMIT.allow(addr[0]) or len(status_pending) >= STATUS_PENDING_MAX:
+                THROTTLE(slog, logging.WARNING, f"9101-rate-{addr[0]}",
+                         "9101: too many polls from %s; dropping some", addr[0])
+                conn.close()
+            else:
+                conn.setblocking(False)
+                status_pending[conn] = (addr, time.time() + STATUS_QUERY_WAIT)
 
 
 def run_station(station: Station):
@@ -701,6 +1065,34 @@ def run_station(station: Station):
     except Exception:
         station.log.exception("bridge: fatal error")
         os._exit(1)
+
+
+def current_addresses(path: str) -> dict:
+    """{printer name: resolved address or None} for every printer in the config."""
+    try:
+        return {p["name"]: resolve_address(p["name"], p["address"]) for p in read_printer_config(path)}
+    except (OSError, ValueError):
+        return {}
+
+
+def watch_addresses(path: str, stations: list, interval: float = 10.0):
+    """Exit (for systemd to restart us) when a printer's resolved address changes.
+
+    Addresses come from DHCP (`auto`, `dhcp`), so they can change: a new lease,
+    a renewal with a different address, or joining another Wi-Fi network. The
+    listeners are bound to specific addresses, so the simplest correct response
+    is a clean restart, which takes a few seconds.
+    """
+    serving = {s.name: s.address for s in stations}
+    while True:
+        time.sleep(interval)
+        now = current_addresses(path)
+        if not now:
+            continue
+        wanted = {k: v for k, v in now.items() if v}
+        if wanted != serving:
+            log.info("addresses changed %s -> %s; restarting", serving, wanted)
+            os._exit(0)
 
 
 DEFAULT_CONFIG = "/etc/star-lan-bridge.conf"
@@ -723,6 +1115,9 @@ def main():
     ifaces = a.iface or ["wlan0", "eth0"]
     if os.path.exists(a.config):
         stations = load_config(a.config)
+        threading.Thread(target=watch_addresses, args=(a.config, stations), daemon=True).start()
+        if not stations:
+            log.warning("no printer has an address yet; waiting for a network")
         log.info("config %s: %s", a.config,
                  "; ".join(f"{s.name}={s.device}@{s.address}" for s in stations))
     else:

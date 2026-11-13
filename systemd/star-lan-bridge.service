@@ -19,11 +19,37 @@ User=starbridge
 Group=dialout
 Restart=always
 RestartSec=3
-# Sandboxing: the bridge only needs the network and the RFCOMM device.
+# --- Sandbox (see docs/SECURITY.md) ---
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+UMask=0077
+# Network: only this host and private (venue LAN) addresses, never the internet.
+IPAddressDeny=any
+IPAddressAllow=localhost link-local multicast 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+# No capabilities at all; the only devices it can open are the RFCOMM ports.
+CapabilityBoundingSet=
+AmbientCapabilities=
+DevicePolicy=closed
+DeviceAllow=char-rfcomm rw
+# AF_BLUETOOTH: `rfcomm show` (link state); AF_INET: the bridge itself.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_BLUETOOTH
 
 [Install]
 WantedBy=multi-user.target

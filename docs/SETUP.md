@@ -20,8 +20,10 @@ for i in $(seq 1 254); do ping -c1 -W 300 192.168.1.$i >/dev/null 2>&1 & done; w
 arp -an | grep -iE 'b8:27:eb|dc:a6:32|e4:5f:01|d8:3a:dd|2c:cf:67|28:cd:c1|88:a2:9e'
 ```
 
-Give the Pi a **DHCP reservation** on your router. POS apps store the printer
-by IP address.
+POS apps store the printer by IP address, so keep the Pi's address stable. With
+**one printer per Pi**, give the Pi a DHCP reservation on the router. With
+**several printers**, don't reserve the Pi's MAC on routers like UniFi; see
+[ADMIN.md, Router reservations](ADMIN.md#router-reservations).
 
 ## 2. Wi-Fi (if not set in Imager)
 
@@ -85,7 +87,8 @@ Expected `discover` output includes `model TSP143IIILAN (STR_T-001)` and the
 Pi's IP; `etb` shows the counter going from 0 to 1.
 
 With no config file the bridge serves this one printer on all of the Pi's
-addresses. For a second printer, see [§7](#7-several-printers).
+addresses. For a second printer, see [§7](#7-several-printers). To join Wi-Fi networks and see the
+addresses from a browser, see [ADMIN.md](ADMIN.md).
 
 ## 5. Optional: CUPS for laptops and phones
 
@@ -118,34 +121,20 @@ with the app's TSP100III model set to either the W (Wi-Fi) or the LAN variant.
 ## 7. Several printers
 
 Each printer needs its own LAN address, because Star clients identify printers by
-IP and the ports (22222, 9100, 9101) are fixed. On Wi-Fi, add the extra address
-to the existing connection. It shares the Pi's MAC, so access points accept it:
-a virtual interface with its own MAC (macvlan) generally won't work on Wi-Fi.
+IP and the ports (22222, 9100, 9101) are fixed. Addresses come from DHCP, so the
+same configuration works on any venue network:
 
-1. **Pick an unused address**, ideally outside the router's DHCP pool (or
-   excluded from it), so nothing else gets handed the same IP:
+* **One printer** uses the Pi's own DHCP address (`address = auto`).
+* **Each extra printer** gets its own DHCP lease (`address = dhcp`). The
+  `star-admin` service ([ADMIN.md](ADMIN.md)) requests it with BusyBox `udhcpc`,
+  using the Pi's MAC (Wi-Fi access points only accept that one) and a separate
+  DHCP **client ID** per printer, which routers treat as a separate device.
+  The client ID is fixed per Pi and printer, so the router keeps giving back the
+  same address.
 
-   ```bash
-   # Pi: no reply and an INCOMPLETE neighbour entry means nothing answers there
-   ping -c2 -W1 192.168.1.250; ip neigh show 192.168.1.250
-   ```
+Steps:
 
-2. **Add it as a second address** on the Wi-Fi connection. `reapply` applies it
-   without dropping the link:
-
-   ```bash
-   # Pi
-   C=$(nmcli -t -f NAME,DEVICE con show --active | grep ":wlan0$" | cut -d: -f1)
-   sudo nmcli con mod "$C" +ipv4.addresses 192.168.1.250/24
-   sudo nmcli dev reapply wlan0
-   ip -4 addr show wlan0
-   ```
-
-   DHCP keeps working for the Pi's main address. Give that one a DHCP
-   reservation too: the bridge listens on it explicitly once a config file
-   exists, so a changed lease means editing the config.
-
-3. **Pair the second printer and bind it to `/dev/rfcomm1`.** If pairing shows
+1. **Pair the second printer and bind it to `/dev/rfcomm1`.** If pairing shows
    `Paired: yes` and then `Paired: no` right away, the adapter isn't pairable:
    run `pairable on` in the same `bluetoothctl` session before `pair`.
 
@@ -160,14 +149,23 @@ a virtual interface with its own MAC (macvlan) generally won't work on Wi-Fi.
    sudo systemctl daemon-reload && sudo systemctl enable --now rfcomm-printer2
    ```
 
-4. **Write `/etc/star-lan-bridge.conf`** (start from
-   [examples/star-lan-bridge.conf](../examples/star-lan-bridge.conf)). Use one
-   `[printer:NAME]` section per printer, each with its own `device`, `address`
-   and `local`, and a distinct `mac` for every printer after the first. Keep the
-   first printer's address and MAC unchanged so POS terminals that already
-   know it still recognise it.
+2. **Write `/etc/star-lan-bridge.conf`** from
+   [examples/star-lan-bridge.conf](../examples/star-lan-bridge.conf): one
+   `[printer:NAME]` section per printer, `address = auto` for the first and
+   `address = dhcp` for the rest, each with its own `device` and `local`, and a
+   distinct `mac` for every printer after the first.
 
-5. **Restart the bridge and point each CUPS queue at its printer's local address:**
+3. **Install star-admin**, which keeps the extra leases (and gives you the web page):
+
+   ```bash
+   # Pi
+   sudo ./scripts/install-admin.sh
+   sudo python3 /opt/star-lan-bridge/star_admin.py --set-password
+   cat /run/star-lan-bridge/lease-TSP143-2        # ip=... once the lease arrives
+   ```
+
+4. **Restart the bridge once.** After that it restarts by itself whenever an
+   address changes. Then point each CUPS queue at its printer's local address:
 
    ```bash
    # Pi
@@ -176,14 +174,21 @@ a virtual interface with its own MAC (macvlan) generally won't work on Wi-Fi.
    sudo lpadmin -p TSP143-2 -E -v socket://127.0.0.2:9100 -m star/tsp143.ppd -o printer-is-shared=true
    ```
 
-6. **Check from another machine.** A broadcast should get one reply per printer,
-   and a unicast only the printer at that address:
+5. **Check from another machine.** A broadcast gets one reply per printer:
 
    ```bash
    python3 tools/star_probe.py discover --broadcast 192.168.1.255
-   python3 tools/star_probe.py discover --host 192.168.1.250
-   python3 tools/star_probe.py status --host 192.168.1.250
+   python3 tools/star_probe.py status --host <printer-2-address>
    ```
+
+6. **Leave the leases as plain DHCP.** They stay stable by themselves. Don't
+   add a fixed IP for the Pi's MAC on UniFi or other routers that reserve by
+   MAC: it can apply to every printer's lease, because they all use that MAC.
+   See [ADMIN.md, Router reservations](ADMIN.md#router-reservations).
+
+If a router hands out leases by MAC address only, every client ID gets the
+Pi's own address. The page then shows printer 2 with the same address as
+printer 1; that network can't run more than one printer per Pi.
 
 ## Uninstall
 
