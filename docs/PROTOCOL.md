@@ -10,7 +10,7 @@ with its source:
 
 | Tag | Meaning |
 |---|---|
-| **[observed]** | Seen directly in packet captures and bridge logs while building this project (Next Order POS 6.0.0 on a SunMi D3 Pro, a Bluetooth TSP143IIIBI, macOS CUPS). |
+| **[observed]** | Seen directly in packet captures and bridge logs while building this project (Next Order POS 6.0.0 on a SunMi D3 Pro, two Bluetooth TSP143IIIBI printers on one Pi, macOS CUPS). |
 | **[reference]** | From the reverse-engineering notes in [gnaunited/tsp143-bridge](https://github.com/gnaunited/tsp143-bridge) (captured from a real TSP100IIILAN, firmware V2.2). |
 | **[Star]** | From Star Micronics' published command manuals (StarPRNT / Star Line Mode command specifications, ASB specification). |
 | **[unconfirmed]** | Seen but not decoded. Don't rely on it. |
@@ -268,8 +268,9 @@ That's unlikely, and far less harmful than duplicate receipts.
 
 * On connect, the bridge sends the cached status once (11 bytes) as a greeting.
   The client reads it before sending data **[observed]**.
-* One client at a time. Others wait in the TCP backlog (8). CUPS uses this
-  channel too, through `socket://127.0.0.1:9100`.
+* One client at a time per printer. Others wait in the TCP backlog (8). CUPS
+  uses this channel too, through `socket://127.0.0.1:9100`, or each printer's
+  own `local` address (`127.0.0.2`, …) when several printers are configured.
 * The job is complete when the client closes its side. The bridge doesn't add
   any end-of-job handling.
 
@@ -312,8 +313,11 @@ A real TSP100IIILAN doesn't answer mDNS, SNMP (UDP 161) or UDP 3289
 
 CUPS renders jobs with Star's `rastertostar` filter (the TSP100 series accepts
 only raster graphics) and sends them with the `socket` backend to
-`127.0.0.1:9100`. To the bridge, CUPS is just another print client: it
-receives the status greeting and frames, which the socket backend ignores.
+`127.0.0.1:9100`. With several printers, each CUPS queue points at its own
+printer's loopback address (`socket://127.0.0.2:9100` for the second, and so
+on). Linux routes all of 127.0.0.0/8 to loopback, so these need no setup. To
+the bridge, CUPS is just another print client: it receives the status greeting
+and frames, which the socket backend ignores.
 
 On Raspberry Pi OS, mask `colord`. Otherwise `gstoraster` waits for two 25-second
 D-Bus timeouts per job, because `colord` exits as soon as it starts on a headless

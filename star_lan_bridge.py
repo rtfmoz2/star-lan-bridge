@@ -16,18 +16,23 @@ with the printer, and answers on the network exactly like a TSP143IIILAN:
                client sends a 51-byte query, gets two 11-byte ASB frames, closed
 
 The printer is reached over Bluetooth Serial Port Profile (SPP) through an
-RFCOMM TTY, normally /dev/rfcomm0, which `rfcomm bind` creates (see
-systemd/rfcomm-printer.service). The bridge is meant to be the *only* process
-that opens that TTY. Point any CUPS queue at socket://127.0.0.1:9100 so CUPS
-jobs and POS jobs queue behind each other instead of fighting over the single
-Bluetooth connection the printer accepts.
+RFCOMM TTY, normally /dev/rfcomm0 (rfcomm1, ... for more printers), which
+`rfcomm bind` creates (see systemd/rfcomm-printer.service). The bridge is meant
+to be the *only* process that opens those TTYs. Point each printer's CUPS queue
+at the bridge (socket://127.0.0.1:9100, or that printer's `local` address from
+the config) so CUPS jobs and POS jobs queue behind each other instead of
+fighting over the single Bluetooth connection the printer accepts.
 
 Design notes
 ------------
-* Single-threaded select() loop for TCP + printer I/O, plus one daemon thread
-  for UDP discovery (discovery must never wait behind a slow Bluetooth write).
-* One print client at a time. While a 9100 client is connected the listening
-  socket is left out of select(), so later clients wait in the kernel backlog.
+* One thread per printer, each running a select() loop over that printer's
+  9100/9101 listeners and RFCOMM link, plus one thread for UDP discovery that
+  answers for every printer. Discovery never waits behind a slow Bluetooth
+  write, and one printer's job never delays another's. If any printer's loop
+  crashes, the process exits so systemd restarts it cleanly.
+* One print client at a time per printer. While a 9100 client is connected the
+  listening sockets are left out of select(), so later clients wait in the
+  kernel backlog.
 * Status is never synthesised. POS apps compare the ETB counter they see on
   9100/9101 with what they expect; a fake counter makes them think the job
   failed and resend it. The bridge only relays the printer's real ASB frames.

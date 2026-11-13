@@ -2,10 +2,14 @@
 # Installed to /etc/systemd/system/ by scripts/install.sh.
 [Unit]
 Description=Star LAN printer emulation (discovery UDP 22222, print TCP 9100, status TCP 9101) for a Bluetooth Star printer
-Documentation=https://github.com/<you>/star-lan-bridge
+Documentation=https://github.com/rtfmoz2/star-lan-bridge
 After=network-online.target bluetooth.service rfcomm-printer.service
 Wants=network-online.target
 # The bridge needs /dev/rfcomm0, which rfcomm-printer.service creates.
+# For more printers, add each extra binding here too, e.g.
+#   After=rfcomm-printer2.service
+#   Wants=rfcomm-printer2.service
+# and list every printer in /etc/star-lan-bridge.conf (docs/SETUP.md §7).
 Requires=rfcomm-printer.service
 
 [Service]

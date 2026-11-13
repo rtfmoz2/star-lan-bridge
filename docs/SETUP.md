@@ -60,7 +60,7 @@ sudo sdptool browse $M | grep -A8 -i "Serial Port" | grep -i Channel
 
 ```bash
 # Pi
-git clone https://github.com/<you>/star-lan-bridge.git
+git clone https://github.com/rtfmoz2/star-lan-bridge.git
 cd star-lan-bridge
 sudo ./scripts/install.sh --mac $M --channel 1
 ```
@@ -83,6 +83,9 @@ python3 tools/star_probe.py etb --host 192.168.1.134
 
 Expected `discover` output includes `model TSP143IIILAN (STR_T-001)` and the
 Pi's IP; `etb` shows the counter going from 0 to 1.
+
+With no config file the bridge serves this one printer on all of the Pi's
+addresses. For a second printer, see [§7](#7-several-printers).
 
 ## 5. Optional: CUPS for laptops and phones
 

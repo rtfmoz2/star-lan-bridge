@@ -6,10 +6,13 @@ Start with the bridge log. It records every discovery reply, print job and link 
 journalctl -u star-lan-bridge -f
 ```
 
+Every line names the printer it's about, e.g. `[TSP143-2] 9100: connection from
+192.168.1.141:45328` (in single-printer mode the name is `printer`).
+
 ## The POS prints two or more copies of every receipt
 
 **Symptom:** each job takes about 30 s, then the same receipt prints again.
-The log shows repeated `9100: connection from …` lines about 33 s apart.
+The log shows repeated `[NAME] 9100: connection from …` lines about 33 s apart.
 
 **Cause:** the client disabled ASB (`ESC RS a 0`) and never saw the ETB
 counter rise (see [PROTOCOL.md §4.3](PROTOCOL.md#43-why-esc-rs-a-0-is-stripped)).
@@ -71,3 +74,39 @@ this happens.
 
 That's expected: the printer accepts one Bluetooth connection and the bridge
 holds it. Print through the Pi instead, over IPP/AirPrint or Star LAN.
+
+## Pairing says "Paired: yes" and then "Paired: no"
+
+The adapter isn't pairable, so the bond isn't stored. Turn pairing on in the
+same `bluetoothctl` session as the `pair` command:
+
+```bash
+{ echo "pairable on"; sleep 1; echo "pair <MAC>"; sleep 15; echo "trust <MAC>"; sleep 3; echo quit; } | bluetoothctl
+bluetoothctl info <MAC> | grep -E "Paired|Bonded|Trusted"     # all three: yes
+```
+
+## A second printer doesn't show up in the POS
+
+* Does the bridge know about it? At start it logs one
+  `[NAME] bridge: listening on <address>, <local> ...` line per printer.
+  If only one appears, check `/etc/star-lan-bridge.conf`.
+* Is its address on the host? `ip -4 addr show wlan0` must list it. The bridge
+  logs `can't bind <address>:9100 yet ... retrying every 5s` until it appears.
+* From another machine, `python3 tools/star_probe.py discover` should get one
+  reply per printer, and `discover --host <address>` only that printer.
+* Did something else take the address? Exclude each printer's address from the
+  router's DHCP pool. If another device answers there, the POS reaches it instead.
+
+## The POS reports the printer is out of paper (or every job "succeeds" but nothing prints)
+
+The bridge passes the printer's own status through unchanged. A printer with
+no paper reports `23 86 08 00 00 08 00 …`
+(see [PROTOCOL.md §3.3](PROTOCOL.md#33-fields-the-bridge-depends-on)).
+Check what it's reporting without printing anything:
+
+```bash
+python3 tools/star_probe.py status --host <printer-ip>
+```
+
+Load paper and close the cover. A healthy idle printer reports
+`23 86 00 00 00 00 …`.

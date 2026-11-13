@@ -17,6 +17,9 @@
   Chunked filtering now matches whole-stream filtering exactly.
 * docs: SETUP.md §7 "Several printers"; PROTOCOL.md §2.4 multi-printer
   discovery and the observed paper-empty ASB pattern.
+* docs: README covers several printers; TROUBLESHOOTING.md adds pairing that
+  won't stick, a second printer that doesn't appear, and paper-out status;
+  repository URLs filled in.
 
 ## 0.1.0 (2026-11-13)
 
