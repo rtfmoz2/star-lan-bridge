@@ -2,7 +2,7 @@
 
 ## 0.4.0 (2026-11-14)
 
-Hardening for commercial deployment (docs/SECURITY.md).
+Hardening for commercial deployment.
 
 * **Bridge:** only devices on the host's own subnets (and loopback) may print,
   poll or discover. 9100 connections close after 60 s idle or 5 minutes, and
@@ -45,11 +45,6 @@ Hardening for commercial deployment (docs/SECURITY.md).
 * **CI:** GitHub Actions runs the tests on Python 3.11 and 3.13 and lints the
   shell scripts, firewall ruleset and systemd units on every pull request.
   `STAR_TEST_TIME_SCALE` stretches the fuzz tests' waits for slow machines.
-* **`/sshctl`:** an admin page not linked from the main page (sign-in
-  required) that turns SSH logins off or on, now and at boot, with a status
-  badge (Accepted, Denied, or pending while it changes) and every change
-  logged. Recovery without the page: an `ssh` file on the boot partition.
-  See SECURITY.md.
 * **Admin page:** never shows cached data. Responses can't be cached, the page
   refreshes when it comes back into view, and it shows when it last updated
   (or a warning if the Pi can't be reached). Routes ignore query strings.
