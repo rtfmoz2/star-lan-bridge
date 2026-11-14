@@ -154,7 +154,7 @@ checking on a Pi (see [docs/SETUP.md](docs/SETUP.md)).
   not on open guest Wi-Fi.
 * **Anyone on the staff network can print.** As with a real Star LAN printer,
   that includes opening a cash drawer. The staff Wi-Fi password is the
-  boundary (see [SECURITY.md](docs/SECURITY.md)).
+  boundary.
 * **Identity.** The bridge always reports a TSP143IIILAN. By default it uses
   the host's own MAC; set `mac` per printer to keep printers distinct.
 * **Byte filtering.** The bridge removes the exact bytes `1B 1E 61 00` from

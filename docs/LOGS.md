@@ -5,8 +5,7 @@ page, the printers' DHCP leases, Bluetooth, Wi-Fi and the system. The admin page
 doesn't show logs; read them over SSH.
 
 The journal is kept **across reboots and power cuts** on the SD card, capped at
-**100 MB** and **one month**, with **2 GB** always left free (see
-[SECURITY.md, Logs and storage](SECURITY.md#logs-and-storage)). Logs from before
+**100 MB** and **one month**, with **2 GB** always left free. Logs from before
 a power cut are still there.
 
 ## Getting in

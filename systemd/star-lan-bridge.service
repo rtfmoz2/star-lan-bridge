@@ -19,7 +19,7 @@ User=starbridge
 Group=dialout
 Restart=always
 RestartSec=3
-# --- Sandbox (see docs/SECURITY.md) ---
+# --- Sandbox ---
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes

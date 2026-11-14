@@ -11,7 +11,7 @@ ExecStart=/usr/bin/python3 /opt/star-lan-bridge/star_admin.py
 # Root: it writes NetworkManager connection files and binds port 80.
 Restart=always
 RestartSec=3
-# --- Sandbox (see docs/SECURITY.md) ---
+# --- Sandbox ---
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes

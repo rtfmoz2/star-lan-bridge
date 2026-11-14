@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT
 #
-# Lock down a star-lan-bridge host for deployment (see docs/SECURITY.md).
+# Lock down a star-lan-bridge host for deployment.
 #
 #   sudo ./scripts/harden.sh            apply everything; the firewall rolls
 #                                       back by itself after 3 minutes unless
