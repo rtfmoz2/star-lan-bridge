@@ -27,7 +27,7 @@ printer's own lease  ──▶ /dev/rfcomm1 ──▶ printer 2   (address = dhc
 ```
 
 **Web admin page.** `star-admin` serves a password-protected page at
-`http://<hostname>.local` for joining a Wi-Fi network and seeing each printer's
+`http://<hostname or IP address>` for joining a Wi-Fi network and seeing each printer's
 address and status, so a Pi can move to a new venue without SSH. See
 [docs/ADMIN.md](docs/ADMIN.md).
 

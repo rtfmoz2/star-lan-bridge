@@ -4,16 +4,16 @@
 
 Read-only by default: nothing here prints a receipt.
 
-  star_probe.py discover [--broadcast 192.168.1.255] [--timeout 3]
+  star_probe.py discover [--broadcast <broadcast-address>] [--timeout 3]
       Send the 28-byte Star Discovery query to UDP 22222 and decode every reply.
 
-  star_probe.py discover --host 192.168.1.134
+  star_probe.py discover --host <printer-address>
       Unicast query to one printer (this is how some POS apps test "connected").
 
-  star_probe.py status --host 192.168.1.134 [--count 3]
+  star_probe.py status --host <printer-address> [--count 3]
       Poll TCP 9101 like StarIO: send 0x32 + 50 NULs, read two 11-byte ASB frames.
 
-  star_probe.py etb --host 192.168.1.134
+  star_probe.py etb --host <printer-address>
       Connect to TCP 9100, clear the ETB counter, send one ETB and report the
       counter before/after from the ASB frames. Prints nothing (no image data).
 

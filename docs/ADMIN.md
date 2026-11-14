@@ -4,8 +4,15 @@
 SSH. It's built for venues where the Pi and the POS share the venue's **staff
 WPA2 network**.
 
-Open **`http://<hostname>.local`** (Mac) or **`http://<hostname>`** or the Pi's
-IP address from a phone or laptop on the same network, and sign in.
+Open **`http://<hostname or IP address>`** from a phone or laptop on the same
+network, and sign in.
+
+Which one works depends on the device and network. The IP address always works.
+The hostname works only where it can be looked up: as `<hostname>.local` on Apple
+devices and most Linux machines, or as the plain hostname where the router hands
+out local names. To find the IP address, look in the router's list of connected
+devices; once you're signed in, the page's **Network** section shows every address
+the Pi has.
 
 | Section | What it shows or does |
 |---|---|
@@ -34,13 +41,14 @@ There is no setup hotspot. Use one of these:
    page, enter the venue's Wi-Fi name and password, and choose **Save for later**.
    At the venue, the Pi joins it by itself (saved networks get priority 10).
 2. **Use a cable at the venue.** Plug the Pi's Ethernet port into the venue's
-   router or switch, open ``http://<hostname>.local` (Mac) or `http://<hostname>` from a device on that network,
-   and choose **Connect now**.
+   router or switch, open `http://<hostname or IP address>` from a device on that
+   network, and choose **Connect now**.
 
 After **Connect now**:
 
 * If you reached the page over the Pi's Wi-Fi, the page goes away while the Pi
-  switches. Join the same network on your phone and reload `http://<hostname>.local` (Mac) or `http://<hostname>`.
+  switches. Join the same network on your phone and reload
+  `http://<hostname or IP address>`.
 * If the connection fails (wrong password, out of range), the Pi deletes that
   profile and goes back to the network it was on. The page then explains what
   happened.
@@ -74,8 +82,8 @@ itself, within about 10 seconds, when any printer's address changes.
 * **star-admin restarted:** it asks for the same address again (`udhcpc -r`) and
   nothing changes.
 
-Tested on a UniFi network: printer 2 kept `192.168.1.140` across star-admin
-restarts while printer 1 used the Pi's own `192.168.1.134`.
+Tested on a UniFi network: printer 2 kept the same lease across star-admin
+restarts while printer 1 used the Pi's own address.
 
 **Routers that lease by MAC only** give every client ID the Pi's own address.
 The **Printers** section then shows printer 2 with the same address as printer 1,
@@ -96,7 +104,7 @@ own reserved address, or keep being refused, and printer 2 disappears.
 
 Leave those leases as ordinary DHCP instead. They are already stable: each
 printer asks with a fixed client ID, and the router keeps handing back the same
-address (UniFi kept 192.168.1.140 across reboots and restarts). Only DHCP
+address (UniFi kept printer 2's lease across reboots and restarts). Only DHCP
 servers that can reserve by **client identifier** (option 61) can pin each
 printer separately, for example ISC/Kea, dnsmasq's `id:` host entries or Windows
 Server DHCP. There, reserve the Pi's MAC for the Pi and each printer's client

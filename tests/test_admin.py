@@ -16,7 +16,7 @@ spec.loader.exec_module(admin)
 
 class NmcliParsingTest(unittest.TestCase):
     def test_plain_fields(self):
-        self.assertEqual(admin.nm_split("*:UNIFI:57:WPA2:64"), ["*", "UNIFI", "57", "WPA2", "64"])
+        self.assertEqual(admin.nm_split("*:SSID:57:WPA2:64"), ["*", "SSID", "57", "WPA2", "64"])
 
     def test_escaped_colon_and_backslash(self):
         self.assertEqual(admin.nm_split(r" :Cafe\:Guest:40:WPA2:6"), [" ", "Cafe:Guest", "40", "WPA2", "6"])
