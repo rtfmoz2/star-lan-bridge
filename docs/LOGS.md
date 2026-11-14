@@ -14,7 +14,7 @@ a power cut are still there.
 From a laptop on the same network as the Pi, with the SSH key used to set it up:
 
 ```bash
-ssh <user>@<hostname>.local          # e.g. ssh rtfmoz@jolly.local, or use the Pi's IP
+ssh <user>@<hostname or ip address>
 ```
 
 The firewall only accepts SSH from private (venue LAN) addresses. The admin user
@@ -97,11 +97,11 @@ journalctl -b -1 -e                           # end of the previous boot: what h
 
 ```bash
 # From the laptop: the previous boot, everything, into a text file
-ssh rtfmoz@jolly.local 'journalctl -b -1 -o short-iso --no-pager' > pi-previous-boot.txt
+ssh <user>@<hostname or ip address> 'journalctl -b -1 -o short-iso --no-pager' > pi-previous-boot.txt
 
 # The bridge, admin page and leases over the last day (the alias isn't
 # available in a one-off ssh command, so the full filter is spelled out)
-ssh rtfmoz@jolly.local 'journalctl --since "-1 day" -o short-iso --no-pager _SYSTEMD_UNIT=star-lan-bridge.service + _SYSTEMD_UNIT=star-admin.service + SYSLOG_IDENTIFIER=star-dhcp' > pi-bridge.txt
+ssh <user>@<hostname or ip address> 'journalctl --since "-1 day" -o short-iso --no-pager _SYSTEMD_UNIT=star-lan-bridge.service + _SYSTEMD_UNIT=star-admin.service + SYSLOG_IDENTIFIER=star-dhcp' > pi-bridge.txt
 ```
 
 `-o short-iso` adds full dates to every line, which makes the logs easier to
