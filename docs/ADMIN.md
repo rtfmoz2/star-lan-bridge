@@ -82,8 +82,8 @@ itself, within about 10 seconds, when any printer's address changes.
 * **star-admin restarted:** it asks for the same address again (`udhcpc -r`) and
   nothing changes.
 
-Tested on a UniFi network: printer 2 kept `192.168.1.140` across star-admin
-restarts while printer 1 used the Pi's own `192.168.1.134`.
+Tested on a UniFi network: printer 2 kept the same lease across star-admin
+restarts while printer 1 used the Pi's own address.
 
 **Routers that lease by MAC only** give every client ID the Pi's own address.
 The **Printers** section then shows printer 2 with the same address as printer 1,
@@ -104,7 +104,7 @@ own reserved address, or keep being refused, and printer 2 disappears.
 
 Leave those leases as ordinary DHCP instead. They are already stable: each
 printer asks with a fixed client ID, and the router keeps handing back the same
-address (UniFi kept 192.168.1.140 across reboots and restarts). Only DHCP
+address (UniFi kept printer 2's lease across reboots and restarts). Only DHCP
 servers that can reserve by **client identifier** (option 61) can pin each
 printer separately, for example ISC/Kea, dnsmasq's `id:` host entries or Windows
 Server DHCP. There, reserve the Pi's MAC for the Pi and each printer's client

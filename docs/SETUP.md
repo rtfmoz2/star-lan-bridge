@@ -79,8 +79,8 @@ journalctl -u star-lan-bridge -f
 ```bash
 # client: nothing below prints a receipt
 python3 tools/star_probe.py discover
-python3 tools/star_probe.py status --host 192.168.1.134
-python3 tools/star_probe.py etb --host 192.168.1.134
+python3 tools/star_probe.py status --host <printer-address>
+python3 tools/star_probe.py etb --host <printer-address>
 ```
 
 Expected `discover` output includes `model TSP143IIILAN (STR_T-001)` and the
@@ -177,7 +177,7 @@ Steps:
 5. **Check from another machine.** A broadcast gets one reply per printer:
 
    ```bash
-   python3 tools/star_probe.py discover --broadcast 192.168.1.255
+   python3 tools/star_probe.py discover --broadcast <broadcast-address>   # e.g. 192.168.0.255 on a 192.168.0.x network
    python3 tools/star_probe.py status --host <printer-2-address>
    ```
 

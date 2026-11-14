@@ -11,7 +11,7 @@ Logs survive reboots and power cuts (capped at 100 MB and one month). After a
 power cut, `journalctl -u star-lan-bridge -b -1` shows the boot before it.
 
 Every line names the printer it's about, e.g. `[TSP143-2] 9100: connection from
-192.168.1.141:45328` (in single-printer mode the name is `printer`).
+<pos-address>:45328` (in single-printer mode the name is `printer`).
 
 ## The POS prints two or more copies of every receipt
 

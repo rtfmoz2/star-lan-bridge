@@ -75,7 +75,7 @@ Hex of a complete query:
 
 Sending rules:
 
-* To **search**, clients broadcast to the subnet (`192.168.1.255`) and/or
+* To **search**, clients broadcast to the subnet's broadcast address and/or
   `255.255.255.255`. Next Order POS sends a query about every 0.3 s for about
   10 s **[observed]**.
 * To **check** a printer it already knows, the client unicasts the query to
@@ -146,9 +146,9 @@ own DHCP lease, requested with the Pi's MAC and a per-printer DHCP client ID
   address. Linux delivers it to the socket bound to that exact address rather
   than the `0.0.0.0` socket.
 
-Verified with two TSP143IIIBI printers, first at 192.168.1.134 and a fixed
-192.168.1.250, then at 192.168.1.134 (the Pi's DHCP address) and 192.168.1.140
-(printer 2's own DHCP lease from a UniFi router). A broadcast got two replies,
+Verified with two TSP143IIIBI printers, first with a fixed second address and
+then with only DHCP: printer 1 on the Pi's own DHCP address and printer 2 on its
+own DHCP lease from a UniFi router. A broadcast got two replies,
 one per printer and each from its own address, and a unicast got only its own
 printer **[observed]**.
 

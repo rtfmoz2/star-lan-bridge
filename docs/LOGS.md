@@ -110,20 +110,20 @@ share.
 
 | Log line | Meaning |
 |---|---|
-| `config /etc/star-lan-bridge.conf: TSP143=/dev/rfcomm0@192.168.1.134; ...` | Bridge started; each printer with its device and address |
+| `config /etc/star-lan-bridge.conf: TSP143=/dev/rfcomm0@<pi-address>; ...` | Bridge started; each printer with its device and address |
 | `[TSP143] printer: connected via /dev/rfcomm0, ASB enabled` | Bluetooth link to that printer is up |
 | `[TSP143] printer: unreachable: printer didn't answer (off, asleep or out of range); retrying every 10-60s` | Printer off or out of range; the bridge keeps retrying by itself |
 | `[TSP143] printer: link closed (EOF)` | The printer dropped the link (switched off, slept); reconnects automatically |
-| `[TSP143] 9100: connection from 192.168.1.141:45328` | A POS (or CUPS, from `127.0.0.x`) started a print job |
+| `[TSP143] 9100: connection from <pos-address>:45328` | A POS (or CUPS, from `127.0.0.x`) started a print job |
 | `[TSP143] 9100: ... finished, 48278 bytes received, 1 ASB-disable cmd(s) stripped, status now 23 86 02 ...` | Job delivered. A non-zero byte 7 (`02`) means the printer confirmed it. `23 86 08 00 00 08 ...` means out of paper |
-| `[TSP143] discovery: answered 192.168.1.141:47383 as TSP143IIILAN @ 192.168.1.134` | A POS searched for or checked the printer (logged at most once a minute per POS) |
+| `[TSP143] discovery: answered <pos-address>:47383 as TSP143IIILAN @ <pi-address>` | A POS searched for or checked the printer (logged at most once a minute per POS) |
 | `9100: refused 10.8.0.5 (not on a local network)` | Something outside the venue network tried to print; blocked |
 | `9101: too many polls from ...` / `discovery: rate limit hit by ...` | A device is flooding the bridge; extra requests are dropped |
 | `9100: ... closed: no data for 60 s` / `closed: job larger than 8 MB` | A connection broke the limits and was closed |
 | `addresses changed {...} -> {...}; restarting` | A printer's DHCP address changed; the bridge restarts on the new one |
 | `[TSP143-2] no address yet (address = dhcp)` | That printer is waiting for its DHCP lease |
-| `star-dhcp: TSP143-2: bound 192.168.1.140/24 on wlan0, lease 43200s` | Printer 2 got its address |
-| `dhcp: TSP143-2 lost its address 192.168.1.140; re-adding` | Something removed the address; star-admin put it back |
+| `star-dhcp: TSP143-2: bound <printer-2-address>/24 on wlan0, lease 43200s` | Printer 2 got its address |
+| `dhcp: TSP143-2 lost its address <printer-2-address>; re-adding` | Something removed the address; star-admin put it back |
 | `(... similar suppressed)` | Repeated messages are logged at most once a minute; this is how many were skipped |
 
 ## How much space the logs use
