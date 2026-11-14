@@ -52,7 +52,7 @@ Hardening for commercial deployment.
 ## 0.3.0 (2026-11-14)
 
 * **Web admin page (`star_admin.py`, `star-admin.service`).** At
-  `http://<hostname>.local`, password-protected: shows the Pi's network and
+  `http://<hostname or IP address>`, password-protected: shows the Pi's network and
   addresses and each printer's address, Bluetooth link and status (ready, out
   of paper, switched off); scans for Wi-Fi and joins a network now or saves it
   for later; forgets saved networks. See docs/ADMIN.md.
