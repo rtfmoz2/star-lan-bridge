@@ -1052,11 +1052,23 @@ function render(s) {
       <td style="text-align:right">${n.active?"":`<button class="ghost" data-forget="${esc(n.uuid)}" data-name="${esc(n.name)}">Forget</button>`}</td></tr>`).join("")
     : "<tr><td>No saved networks.</td></tr>";
   const j = s.join || {};
-  if (j.state) {
+  if (joinMessageCurrent(j, s.wifi)) {
     const cls = {ok:"ok", saved:"ok", error:"bad", connecting:"warn"}[j.state] || "unknown";
     const extra = j.addresses ? `<br>Addresses: <span class="mono">${j.addresses.map(esc).join(", ")}</span>` : "";
     $("join-msg").innerHTML = `<div class="msg ${cls}">${esc(j.text)}${extra}</div>`;
+  } else if (j.state) {
+    $("join-msg").innerHTML = "";
   }
+}
+// Show the last join result only while it's still true: "connecting" until it
+// finishes; "Connected to X" only while the Pi is still on X; "saved" and
+// errors for 10 minutes. Otherwise it would keep saying "Connected to" a phone
+// hotspot after the Pi has gone back to the venue network.
+function joinMessageCurrent(j, wifi) {
+  if (!j.state) return false;
+  if (j.state === "connecting") return true;
+  if (j.state === "ok") return !!(wifi && wifi.ssid === j.ssid);
+  return Date.now() / 1000 - (j.time || 0) < 600;
 }
 async function refresh() {
   try {
