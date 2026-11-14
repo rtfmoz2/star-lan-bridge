@@ -33,4 +33,4 @@ if [[ ! -s /etc/star-admin/auth.json ]]; then
     echo "Set the admin password now:"
     echo "  sudo python3 /opt/star-lan-bridge/star_admin.py --set-password"
 fi
-echo "Then open http://$(hostname).local/"
+echo "Then open http://<hostname or IP address>/"

@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: MIT
 """star-admin: a small web page for setting up a star-lan-bridge host on site.
 
-Open http://<hostname>.local (or the Pi's IP) from a phone or laptop on the same
-network, or on an Ethernet cable plugged into the Pi, and you can:
+Open http://<hostname or IP address> from a phone or laptop on the same network,
+or on an Ethernet cable plugged into the Pi, and you can:
 
   * see the Pi's network: Wi-Fi network, signal, every IP address, gateway;
   * see each printer: its IP address, Bluetooth link and paper/online status;
@@ -359,7 +359,6 @@ def status() -> dict:
     wifi = next((n for n in wifi_networks(rescan=False) if n["in_use"]), None)
     return {
         "hostname": socket.gethostname(),
-        "mdns": socket.gethostname() + ".local",
         "wifi": wifi,
         "gateway": route.get("gateway", ""),
         "route_dev": route.get("dev", ""),
@@ -908,7 +907,7 @@ def page_login(error: str, next_path: str = "/") -> str:
     err = f'<div class="msg bad">{html.escape(error)}</div>' if error else ""
     nxt = next_path if next_path in LOGIN_TARGETS else "/"
     return shell("Sign in · printer bridge", f"""
-<h1>Printer bridge</h1><p class="sub">{html.escape(socket.gethostname())}.local</p>
+<h1>Printer bridge</h1><p class="sub mono">{html.escape(socket.gethostname())}</p>
 <form class="card" method="post" action="/login">
 <input type="hidden" name="next" value="{html.escape(nxt)}">
 <label for="password">Admin password</label>
@@ -923,7 +922,7 @@ def page_sshctl() -> str:
 
 SSHCTL_HTML = """
 <div class="row" style="justify-content:space-between">
-  <div><h1>SSH access</h1><p class="sub mono">{{HOST}}.local</p></div>
+  <div><h1>SSH access</h1><p class="sub mono">{{HOST}}</p></div>
   <a class="btn" href="/" style="text-decoration:none">Back</a>
 </div>
 <section class="card">
@@ -977,7 +976,7 @@ def page_app() -> str:
 
 APP_HTML = """
 <div class="row" style="justify-content:space-between">
-  <div><h1>Printer bridge</h1><p class="sub mono">{{HOST}}.local</p></div>
+  <div><h1>Printer bridge</h1><p class="sub mono">{{HOST}}</p></div>
   <button class="ghost" id="logout" type="button">Sign out</button>
 </div>
 <p class="sub" id="updated" role="status">Loading…</p>
@@ -1006,7 +1005,8 @@ APP_HTML = """
       <button type="button" class="ghost" id="save">Save for later</button>
     </div>
     <p><small>Connecting now moves the Pi to that network. If you're using this page over the Pi's current Wi-Fi,
-    you'll lose this page: join the same network on your phone and open <span class="mono">http://{{HOST}}.local</span> again.</small></p>
+    you'll lose this page: join the same network on your phone and open
+    <span class="mono">http://&lt;hostname or IP address&gt;</span> again.</small></p>
   </form>
   <div id="join-msg"></div>
 </section>
