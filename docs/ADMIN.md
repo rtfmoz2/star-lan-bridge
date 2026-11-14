@@ -4,7 +4,7 @@
 SSH. It's built for venues where the Pi and the POS share the venue's **staff
 WPA2 network**.
 
-Open **`http://<hostname>.local`** (for example `http://jolly.local`) or the Pi's
+Open **`http://<hostname>.local`** (Mac) or **`http://<hostname>`** or the Pi's
 IP address from a phone or laptop on the same network, and sign in.
 
 | Section | What it shows or does |
@@ -34,13 +34,13 @@ There is no setup hotspot. Use one of these:
    page, enter the venue's Wi-Fi name and password, and choose **Save for later**.
    At the venue, the Pi joins it by itself (saved networks get priority 10).
 2. **Use a cable at the venue.** Plug the Pi's Ethernet port into the venue's
-   router or switch, open `http://<hostname>.local` from a device on that network,
+   router or switch, open ``http://<hostname>.local` (Mac) or `http://<hostname>` from a device on that network,
    and choose **Connect now**.
 
 After **Connect now**:
 
 * If you reached the page over the Pi's Wi-Fi, the page goes away while the Pi
-  switches. Join the same network on your phone and reload `http://<hostname>.local`.
+  switches. Join the same network on your phone and reload `http://<hostname>.local` (Mac) or `http://<hostname>`.
 * If the connection fails (wrong password, out of range), the Pi deletes that
   profile and goes back to the network it was on. The page then explains what
   happened.
