@@ -83,8 +83,6 @@ and give each printer its own address; see [SETUP.md §7](docs/SETUP.md#7-severa
   adding more printers
 * **[docs/ADMIN.md](docs/ADMIN.md)**: the web page (join Wi-Fi, see addresses),
   how printers get DHCP addresses, and its security
-* **[docs/SECURITY.md](docs/SECURITY.md)**: threat model, how the bridge handles
-  hostile data, the service sandbox, firewall and Pi lockdown (`scripts/harden.sh`)
 * **[docs/PROTOCOL.md](docs/PROTOCOL.md)**: Star Discovery (UDP 22222), ASB
   status frames, the 9100 and 9101 channels, and why `ESC RS a 0` is
   stripped, with each fact tagged by source
