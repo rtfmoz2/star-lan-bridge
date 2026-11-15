@@ -202,7 +202,7 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual([s.name for s in stations], ["a", "c"])
 
     def test_lease_equal_to_host_address_does_not_stop_the_bridge(self):
-        # The on-site failure: the router gave printer 2 the Pi's own address.
+        # The on-site failure: the router gave printer 2 the device's own address.
         d = self.lease_dir({"b": "192.168.50.10"})
         with open(os.path.join(d, "host"), "w") as f:
             f.write("ip=192.168.50.10\nprefix=24\ninterface=wlan0\n")
@@ -232,7 +232,7 @@ class ConfigTest(unittest.TestCase):
         orig_dev, orig_info = bridge.default_route_iface, bridge.iface_info
         self.addCleanup(setattr, bridge, "default_route_iface", orig_dev)
         self.addCleanup(setattr, bridge, "iface_info", orig_info)
-        # The interface's primary address is a printer's, e.g. after the Pi's lease was renumbered.
+        # The interface's primary address is a printer's, e.g. after the device's lease was renumbered.
         bridge.iface_info = lambda dev: (bytes([192, 168, 50, 250]), b"\xff\xff\xff\0", b"\0" * 6, b"\0" * 4)
         bridge.default_route_iface = lambda: "wlan0"
         self.assertEqual(bridge.resolve_address("a", "auto", d), "192.168.50.10")

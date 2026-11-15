@@ -387,12 +387,12 @@ def read_lease(name: str, lease_dir: str = LEASE_DIR) -> str | None:
 
 
 def host_address(lease_dir: str = LEASE_DIR) -> str | None:
-    """The Pi's own DHCP address on the default-route interface.
+    """The device's own DHCP address on the default-route interface.
 
     star-admin records it in lease_dir/host, leaving out the addresses it added
     for printers. Without that record (star-admin not installed) this is the
-    interface's primary address, which is the Pi's own unless a printer address
-    was promoted after the Pi's lease went away.
+    interface's primary address, which is the device's own unless a printer address
+    was promoted after the device's lease went away.
     """
     dev = default_route_iface()
     if not dev:
@@ -413,7 +413,8 @@ def resolve_address(name: str, value: str, lease_dir: str = LEASE_DIR) -> str | 
 
       auto   the host's own DHCP address on the default-route interface
       dhcp   this printer's own DHCP lease, kept by star-admin
-      next   the next free address after the host's, claimed by star-admin
+      next   the next free address after the host's (or from [network]
+             next_from), claimed by star-admin
       a.b.c.d  used as given
     Returns None if the address isn't known yet (no network, no lease).
     """
@@ -438,7 +439,10 @@ def valid_next_from(v: str) -> bool:
 
 
 def read_printer_config(path: str) -> list[dict]:
-    """[printer:NAME] sections as dicts, without resolving addresses."""
+    """[printer:NAME] sections as dicts, without resolving addresses.
+
+    A printer without its own `address` uses the one in [network], if any.
+    """
     cp = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
     if not cp.read(path):
         raise FileNotFoundError(path)
@@ -472,7 +476,7 @@ def network_settings(cp: configparser.ConfigParser) -> dict:
     address is the default for printers without their own: `next` or `dhcp`
     (`auto` or a fixed address would give every printer the same one).
     next_from is where `address = next` starts looking, for every printer:
-    unset or "after" (just after the Pi's own address), a host number (1-254)
+    unset or "after" (just after the device's own address), a host number (1-254)
     or a full IPv4 address.
     """
     s = cp["network"] if cp.has_section("network") else {}
@@ -574,7 +578,7 @@ class AccessPolicy:
     """Decide whether a client address may use the bridge.
 
     Allowed: loopback (CUPS on this host) and any address inside a subnet the
-    host itself is on, i.e. the venue network the Pi has joined. Everything
+    host itself is on, i.e. the venue network the device has joined. Everything
     else (routed networks, VPNs, the internet) is refused. The host's subnets
     are re-read every 30 s, so joining another network needs no restart.
     """

@@ -287,7 +287,7 @@ class NextCandidatesTest(unittest.TestCase):
     def test_next_from_forms(self):
         s = admin.next_start
         self.assertEqual(str(admin.ipaddress.ip_address(s("192.168.50.10", 24, "150"))), "192.168.50.150")
-        self.assertEqual(str(admin.ipaddress.ip_address(s("10.0.5.10", 16, "200"))), "10.0.5.200")   # Pi's /24
+        self.assertEqual(str(admin.ipaddress.ip_address(s("10.0.5.10", 16, "200"))), "10.0.5.200")   # device's /24
         self.assertEqual(str(admin.ipaddress.ip_address(s("192.168.50.10", 24, "192.168.50.230"))), "192.168.50.230")
         self.assertIsNone(s("192.168.50.10", 24, "after"))
         self.assertIsNone(s("192.168.50.10", 24, "10.0.0.5"))        # outside the subnet

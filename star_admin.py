@@ -3,18 +3,19 @@
 """star-admin: a small web page for setting up a star-lan-bridge host on site.
 
 Open http://<hostname or IP address> from a phone or laptop on the same network,
-or on an Ethernet cable plugged into the Pi, and you can:
+or on an Ethernet cable plugged into the device, and you can:
 
-  * see the Pi's network: Wi-Fi network, signal, every IP address, gateway;
-  * see each printer: its IP address, Bluetooth link and paper/online status;
+  * see the device's network: Wi-Fi network, signal, every IP address, gateway;
+  * see each printer: its IP address, Bluetooth link and paper/online status,
+    and move a printer to another address if another device is using its own;
   * scan for Wi-Fi networks and join one (WPA2-Personal or open), either right
-    away or saved for later, so the Pi moves to it when the current network is
+    away or saved for later, so the device moves to it when the current network is
     out of range;
   * forget saved networks.
 
 Security
 --------
-* Nothing works until an admin password is set on the Pi itself:
+* Nothing works until an admin password is set on the device itself:
       sudo python3 /opt/star-lan-bridge/star_admin.py --set-password
   The password is stored as a salted PBKDF2-SHA256 hash in
   /etc/star-admin/auth.json (root only).
@@ -361,7 +362,7 @@ def printers() -> list[dict]:
 
 
 def label_addresses(ifaces: list[dict], plist: list[dict]) -> list[dict]:
-    """Say whose each address is: the Pi's own ("this device") or a printer's (its name).
+    """Say whose each address is: the device's own ("this device") or a printer's (its name).
 
     Also names the kind: "DHCP", "next available" (claimed by star-admin for a
     printer with address = next) or "fixed".
@@ -424,7 +425,7 @@ def status() -> dict:
 # ---------------------------------------------------------------------------
 class JoinJobs:
     """The most recent join attempt, run in the background so the HTTP response
-    goes out before the Pi (and maybe the browser) changes network."""
+    goes out before the device (and maybe the browser) changes network."""
 
     def __init__(self):
         self.lock = threading.Lock()
@@ -531,7 +532,7 @@ def active_connection(iface: str) -> str | None:
 # Next free address (`address = next`)
 # ---------------------------------------------------------------------------
 NEXT_SPAN = 32          # how many addresses to look through from the start
-NEXT_FROM = "after"     # default start: just after the Pi's own address (next_from changes it)
+NEXT_FROM = "after"     # default start: just after the device's own address (next_from changes it)
 DEFEND_EVERY = 120      # seconds between checks for another device on a claimed address (warns only)
 ZERO_IP = b"\0" * 4
 
@@ -607,10 +608,10 @@ def arp_announce(iface: str, ip: str, count: int = 2):
 
 def next_start(host: str, prefix: int, next_from: str | None = NEXT_FROM) -> int | None:
     """The first address to try for a `next` printer, as an int, or None for
-    "just after the Pi's own address".
+    "just after the device's own address".
 
     next_from is "after" (the default), a host number (200 means .200 in the
-    Pi's /24) or a full IPv4 address. A start outside the Pi's subnet counts as "after".
+    device's /24) or a full IPv4 address. A start outside the device's subnet counts as "after".
     """
     v = (next_from or NEXT_FROM).strip().lower()
     if v == "after":
@@ -635,10 +636,10 @@ def next_candidates(host: str, prefix: int, taken: set[str], remembered: str | N
 
     The address this printer had on this network before (so the POS keeps
     finding it), then up to span addresses upward from next_from if it's set,
-    then up to span addresses just after the Pi's own (the default start, and
+    then up to span addresses just after the device's own (the default start, and
     the fallback when nothing from next_from up is free). Stays
     inside the subnet and skips the broadcast address and anything in taken
-    (the Pi's addresses, the gateway, other printers).
+    (the device's addresses, the gateway, other printers).
     """
     net = ipaddress.ip_interface(f"{host}/{prefix}").network
     out = []
@@ -703,15 +704,17 @@ class AddressManager:
 
     dhcp: one `busybox udhcpc` per printer, with its own client ID; udhcpc and
       star-dhcp-alias.sh add, renew and remove the address. If the router
-      ignores the client ID and hands back the Pi's own address, the hook
+      ignores the client ID and hands back the device's own address, the hook
       refuses it and the printer falls back to `next` on that network.
-    next: the first address after the Pi's own that no device answers ARP for,
-      remembered per network so the printer keeps the same one; checked every
-      couple of minutes and moved if another device turns up on it.
+    next: the first address that nothing else answers ARP for, starting just
+      after the device's own or at [network] next_from; remembered per network
+      so the printer keeps the same one. It never moves by itself: every couple
+      of minutes it's checked, and if another device also answers for it the
+      page shows a warning and a "Find another address" button (request_move).
 
     Everything runs on the interface with the default route and starts again
-    when the Pi moves to another network. The bridge notices address changes
-    by itself and restarts. Also records the Pi's own address for `auto`.
+    when the device moves to another network. The bridge notices address changes
+    by itself and restarts. Also records the device's own address for `auto`.
     """
 
     def __init__(self):
@@ -720,7 +723,7 @@ class AddressManager:
         self.next_start: dict[str, float] = {}
         self.next_check: dict[str, float] = {}
         self.fallback: set[str] = set()      # dhcp printers using `next` on this network
-        self.next_from: str | None = None    # [network] next_from from the config (None: after the Pi)
+        self.next_from: str | None = None    # [network] next_from from the config (None: after the device)
         self.conflict: set[str] = set()      # `next` printers whose address another device answers for
         self.move_requests: set[str] = set() # printers to move, from the page's "Find another address"
         self.lock = threading.Lock()
@@ -795,7 +798,7 @@ class AddressManager:
         return out
 
     def host_ip(self, iface: str) -> tuple[str, int] | None:
-        """The Pi's own address on iface: not one of the printers', DHCP first."""
+        """The device's own address on iface: not one of the printers', DHCP first."""
         mine = self.printer_ips()
         addrs = [a for a in self.own_addresses(iface) if a["ip"] not in mine]
         addrs.sort(key=lambda a: (not a["dhcp"], a["secondary"]))

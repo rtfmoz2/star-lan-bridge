@@ -7,12 +7,12 @@
 # environment. udhcpc calls this script with the lease details in $ip, $mask,
 # $lease, $router, $serverid and $interface.
 #
-# On a lease: add the address to the interface (no extra route: the Pi's own
+# On a lease: add the address to the interface (no extra route: the device's own
 # address already provides the subnet route) with the lease as its lifetime,
 # and record it in $LEASE_DIR/lease-$PRINTER, where the bridge and the admin
 # page read it. On failure: remove the address and the record.
 #
-# A lease for an address the interface already has (normally the Pi's own) is
+# A lease for an address the interface already has (normally the device's own) is
 # refused: the router is handing out addresses by MAC and ignoring the client
 # ID. The hook records that in $LEASE_DIR/clash-$PRINTER, and star-admin
 # switches the printer to the next free address instead.
