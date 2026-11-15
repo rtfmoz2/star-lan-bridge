@@ -13,6 +13,105 @@ power cut, `journalctl -u star-lan-bridge -b -1` shows the boot before it.
 Every line names the printer it's about, e.g. `[TSP143-2] 9100: connection from
 <pos-address>:45328` (in single-printer mode the name is `printer`).
 
+## The Pi doesn't join the venue's Wi-Fi
+
+**Symptom:** at a new venue the Pi never comes up on the network, even though
+the network was saved on the admin page and the name looks right.
+
+* **The name must match exactly**, including spaces, capitals and
+  apostrophes. Staff often write it down slightly differently from what the
+  router broadcasts (`Cafe123` against `Cafe 123`). Copy it from the router's
+  label or settings, not from a note.
+* **The password must match exactly** too. A typo looks the same as a wrong
+  network: the Pi just never joins.
+* **Join from the scan list.** On the admin page, tap the network in the scan
+  list instead of typing its name: the page copies the name exactly. If the
+  Pi isn't on any network, turn on the phone hotspot you saved as a second
+  network ([ADMIN.md, Moving the Pi to a new venue](ADMIN.md#moving-the-pi-to-a-new-venue)),
+  open the admin page from the phone, and join the venue network from there.
+* **See why it failed.** The attempt is kept in the journal, even across a
+  reboot:
+
+  ```bash
+  sudo journalctl -u NetworkManager -u wpa_supplicant -b -1 --no-pager | grep -iE 'assoc|auth|handshake|reason|fail|secrets|not found'
+  ```
+
+  `4-way handshake failed` or `secrets were required` means the password was
+  wrong; `No network with SSID … found` means the name didn't match. Drop
+  `-b -1` if the Pi hasn't rebooted since.
+
+### Collecting everything for a closer look
+
+`tools/collect-wifi-logs.sh` gathers all of it into one archive: every boot's
+NetworkManager, wpa_supplicant and star-admin logs, a summary of the lines that
+usually explain a failed join, the saved networks (names also in hex, which
+shows hidden characters), what the Pi can see (channel, band, security), and
+the Wi-Fi country. Passwords are removed. Run it **before** fixing anything,
+because joining from the scan list replaces the evidence:
+
+```bash
+./tools/collect-wifi-logs.sh                 # writes /tmp/wifi-logs-<date>.tar.gz
+scp <user>@<pi-address>:/tmp/wifi-logs-*.tar.gz .     # from the laptop
+```
+
+To catch the next failure in more detail, turn on NetworkManager's detailed
+logging first (it lasts across reboots, so turn it off afterwards):
+
+```bash
+./tools/collect-wifi-logs.sh --debug-on
+./tools/collect-wifi-logs.sh --debug-off
+```
+
+Logs of earlier boots exist only if the journal is kept on the card
+(`scripts/harden.sh` sets that up); otherwise only the current boot is there.
+
+## Neither printer works and the bridge keeps restarting
+
+**Symptom:** the admin page works, but the POS finds no printers.
+`systemctl status star-lan-bridge` shows `activating (auto-restart)`, and
+`systemctl show star-lan-bridge -p NRestarts` keeps climbing.
+
+**Cause:** in versions before 0.5.0 the bridge exited when two printers had
+the same address, and systemd restarted it straight into the same error:
+
+```
+ValueError: [printer:TSP143-2] address <pi-address> is used by another printer
+```
+
+This happened at a venue whose router hands out addresses by MAC and ignores
+the DHCP client ID, so printer 2's "own" lease was the Pi's own address.
+
+**Fix:** update to 0.5.0 or later, where a clash only skips the printer
+involved and `address = dhcp` falls back to the next available address by
+itself. Better still, set `address = next` for every extra printer (see
+[ADMIN.md, How printer addresses work](ADMIN.md#how-printer-addresses-work)).
+No fixed address is needed.
+
+## A printer moved to a new address and the POS can't print to it
+
+**Symptom:** printing to one printer fails after it was working. The admin
+page shows it on a different address from the one saved in the POS.
+
+**Cause:** with `address = next`, a printer moves only when another device
+turns up on its address. star-admin logs it:
+
+```bash
+journalctl -u star-admin | grep "next:"
+```
+
+```
+WARNING next: another device is now using <old-address>; moving TSP143-2 to another address
+INFO next: TSP143-2 is using <new-address>/24 on wlan0
+```
+
+That normally needs the Pi to be off long enough for the router to hand the
+address to something else, or a power cut where everything restarts at once.
+
+**Fix:** the printer answers the POS's printer search at its new address
+straight away. Next Order POS keeps the old address, though: **delete the
+printer in the POS and add it again** from the search. The new address is
+remembered, so the printer stays there.
+
 ## The POS prints two or more copies of every receipt
 
 **Symptom:** each job takes about 30 s, then the same receipt prints again.
@@ -30,10 +129,11 @@ Some apps (Next Order POS 6.0.0) check the connection with a unicast discovery
 query to the saved IP, and don't make a TCP connection between jobs. A failed
 earlier job can leave the label stuck until the app checks again. Open the
 printer settings or search again, then confirm the log shows
-`discovery: answered <pos-ip>`. If the Pi's IP has changed, the app is querying
-the old address: search for printers again. To stop it changing, see
-[ADMIN.md, Router reservations](ADMIN.md#router-reservations); with several
-printers, don't reserve the Pi's MAC on UniFi.
+`discovery: answered <pos-ip>`. If the printer's address has changed, the app is
+querying the old address: delete the printer in the POS and add it again (see
+[A printer moved to a new address](#a-printer-moved-to-a-new-address-and-the-pos-cant-print-to-it)).
+Printers on `address = next` keep their address even if the Pi's own DHCP
+address changes.
 
 ## Printing through CUPS takes ~50 seconds
 
@@ -113,8 +213,9 @@ bluetoothctl info <MAC> | grep -E "Paired|Bonded|Trusted"     # all three: yes
 * From another machine, `python3 tools/star_probe.py discover` should get one
   reply per printer, and `discover --host <address>` only that printer.
 * Has the address changed? After a long power-off or on a new network, a
-  printer may get a different lease. The admin page shows the current one;
-  search again in the POS.
+  printer may get a different address. The admin page shows the current one
+  under the interface, for example `<address>/24 TSP143-2 (next available)`.
+  Delete the printer in the POS and add it again from the search.
 * Is there a fixed IP for the Pi's MAC on the router? On UniFi and other
   routers that reserve by MAC, it can apply to printer 2's lease too, because
   the same MAC is used. Remove it and restart star-admin
@@ -134,3 +235,20 @@ python3 tools/star_probe.py status --host <printer-ip>
 
 Load paper and close the cover. A healthy idle printer reports
 `23 86 00 00 00 00 …`.
+
+## Mock printers or the test bridge stop after logging out
+
+When testing with `tools/mock_printer.py` ([TESTING.md](TESTING.md)),
+processes started with `&` in an SSH session can stop when that session ends,
+and they never come back after a reboot. The POS and `star_probe.py` then get
+`Connection refused`. Run them as temporary systemd units instead, which
+survive logouts (but still not reboots):
+
+```bash
+sudo systemd-run --unit=mock-TSP143 --uid=$USER python3 ~/star-lan-bridge/tools/mock_printer.py --link ~/mock/TSP143
+sudo systemd-run --unit=test-bridge --uid=$USER -p Restart=always \
+    python3 ~/star-lan-bridge/star_lan_bridge.py -c /etc/star-lan-bridge.conf
+```
+
+With the bridge stopped, the admin page shows each printer as
+`not connected – No answer from the bridge`.
