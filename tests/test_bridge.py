@@ -160,7 +160,7 @@ class ConfigTest(unittest.TestCase):
     def test_example_config_parses(self):
         plist = bridge.read_printer_config(os.path.join(ROOT, "examples", "star-lan-bridge.conf"))
         self.assertEqual([p["name"] for p in plist], ["TSP143", "TSP143-2"])
-        self.assertEqual([p["address"] for p in plist], ["auto", "next"])
+        self.assertEqual([p["address"] for p in plist], ["next", "next"])   # from [network]
         self.assertEqual(plist[1]["device"], "/dev/rfcomm1")
         self.assertEqual(plist[1]["local"], "127.0.0.2")
 
@@ -252,14 +252,28 @@ class ConfigTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             bridge.read_printer_config(self.write("[printer:a]\naddress=dhcp\n"))  # no device
 
-    def test_next_from_option(self):
-        conf = "[printer:a]\ndevice=/dev/rfcomm0\naddress=next\nnext_from = %s\n"
+    def test_next_from_in_network_section(self):
+        printer = "[printer:a]\ndevice=/dev/rfcomm0\naddress=next\n"
+        conf = "[network]\nnext_from = %s\n\n" + printer
         for ok in ("200", "after", "192.168.50.230"):
-            self.assertEqual(bridge.read_printer_config(self.write(conf % ok))[0]["next_from"], ok)
+            path = self.write(conf % ok)
+            self.assertEqual(bridge.read_network_config(path)["next_from"], ok)
+            bridge.read_printer_config(path)  # accepted by the bridge too
         for bad in ("0", "255", "high", "10.0.0"):
             with self.assertRaises(ValueError):
-                bridge.read_printer_config(self.write(conf % bad))
-        self.assertIsNone(bridge.read_printer_config(self.write("[printer:a]\ndevice=/dev/rfcomm0\naddress=next\n"))[0]["next_from"])
+                bridge.read_printer_config(self.write(conf % bad))   # the bridge refuses to start
+        self.assertIsNone(bridge.read_network_config(self.write(printer))["next_from"])
+
+    def test_network_address_applies_to_every_printer(self):
+        conf = ("[network]\naddress = next\n\n[printer:a]\ndevice=/dev/rfcomm0\n\n"
+                "[printer:b]\ndevice=/dev/rfcomm1\naddress = dhcp\n")
+        plist = bridge.read_printer_config(self.write(conf))
+        self.assertEqual([(p["name"], p["address"]) for p in plist], [("a", "next"), ("b", "dhcp")])
+        for bad in ("auto", "192.168.50.40"):
+            with self.assertRaises(ValueError):
+                bridge.read_printer_config(self.write(conf.replace("address = next", "address = " + bad)))
+        with self.assertRaises(ValueError):   # no address anywhere
+            bridge.read_printer_config(self.write("[printer:a]\ndevice=/dev/rfcomm0\n"))
 
     def test_single_printer_mode_listens_everywhere(self):
         st = bridge.Station("printer", "/dev/rfcomm0")

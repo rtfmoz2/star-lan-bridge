@@ -1,6 +1,6 @@
 # Reading the logs
 
-Everything on the Pi logs to the **systemd journal**: the bridge, the admin
+Everything on the device logs to the **systemd journal**: the bridge, the admin
 page, the printers' DHCP leases, Bluetooth, Wi-Fi and the system. The admin page
 doesn't show logs; read them over SSH.
 
@@ -10,7 +10,7 @@ a power cut are still there.
 
 ## Getting in
 
-From a laptop on the same network as the Pi, with the SSH key used to set it up:
+From a laptop on the same network as the device, with the SSH key used to set it up:
 
 ```bash
 ssh <user>@<hostname or ip address>
@@ -29,7 +29,7 @@ is in the `adm` group, so `journalctl` works **without sudo**. Plain log files i
 | **Printer DHCP leases** | `journalctl -t star-dhcp` | each lease, renewal or failure |
 | **Bluetooth bindings** | `journalctl -u rfcomm-printer -u rfcomm-printer2` | `/dev/rfcommN` set up at boot |
 | **Bluetooth stack** | `journalctl -u bluetooth` | BlueZ messages |
-| **Wi-Fi and the Pi's address** | `journalctl -u NetworkManager` | connects, drops, roaming, the Pi's own DHCP lease |
+| **Wi-Fi and the device's address** | `journalctl -u NetworkManager` | connects, drops, roaming, the device's own DHCP lease |
 | **SSH logins** | `journalctl -u ssh` | accepted and refused logins |
 | **Kernel** | `journalctl -k` | drivers, Wi-Fi/Bluetooth chip, SD card errors |
 | **CUPS** (local printing) | `sudo tail -50 /var/log/cups/error_log` | warnings only, file capped at 1 MB |
@@ -47,7 +47,7 @@ filters with `+` ("or"):
 journalctl -b _SYSTEMD_UNIT=star-lan-bridge.service + _SYSTEMD_UNIT=star-admin.service + SYSLOG_IDENTIFIER=star-dhcp
 ```
 
-To save typing, add a shortcut once to `~/.bashrc` on the Pi:
+To save typing, add a shortcut once to `~/.bashrc` on the device:
 
 ```bash
 echo "alias starlog='journalctl _SYSTEMD_UNIT=star-lan-bridge.service + _SYSTEMD_UNIT=star-admin.service + SYSLOG_IDENTIFIER=star-dhcp'" >> ~/.bashrc

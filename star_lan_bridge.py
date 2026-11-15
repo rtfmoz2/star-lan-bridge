@@ -442,6 +442,7 @@ def read_printer_config(path: str) -> list[dict]:
     cp = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
     if not cp.read(path):
         raise FileNotFoundError(path)
+    network = network_settings(cp)
     out = []
     for section in cp.sections():
         if not section.startswith("printer:"):
@@ -450,20 +451,48 @@ def read_printer_config(path: str) -> list[dict]:
         if not re.fullmatch(r"[A-Za-z0-9_.-]{1,32}", name):
             raise ValueError(f"[{section}] printer names use letters, digits, '.', '_' or '-' (max 32)")
         s = cp[section]
-        if not s.get("device") or not s.get("address"):
-            raise ValueError(f"[{section}] needs both 'device' and 'address'")
+        if not s.get("device"):
+            raise ValueError(f"[{section}] needs 'device'")
+        address = (s.get("address") or "").strip() or network["address"]
+        if not address:
+            raise ValueError(f"[{section}] needs 'address' (or set one for all printers in [network])")
         local = s.get("local")
         if local:
             socket.inet_aton(local)
-        next_from = (s.get("next_from") or "").strip() or None
-        if next_from is not None and not valid_next_from(next_from):
-            raise ValueError(f"[{section}] next_from must be a host number (1-254), an IPv4 address "
-                             f"or 'after', not {next_from!r}")
-        out.append({"name": name, "device": s["device"], "address": s["address"].strip(),
-                    "local": local, "mac": s.get("mac"), "next_from": next_from})
+        out.append({"name": name, "device": s["device"], "address": address,
+                    "local": local, "mac": s.get("mac")})
     if not out:
         raise ValueError(f"{path}: no [printer:NAME] sections")
     return out
+
+
+def network_settings(cp: configparser.ConfigParser) -> dict:
+    """The [network] section, checked: {"address": str | None, "next_from": str | None}.
+
+    address is the default for printers without their own: `next` or `dhcp`
+    (`auto` or a fixed address would give every printer the same one).
+    next_from is where `address = next` starts looking, for every printer:
+    unset or "after" (just after the Pi's own address), a host number (1-254)
+    or a full IPv4 address.
+    """
+    s = cp["network"] if cp.has_section("network") else {}
+    address = (s.get("address") or "").strip().lower() or None
+    if address is not None and address not in ("next", "dhcp"):
+        raise ValueError(f"[network] address must be 'next' or 'dhcp' (it applies to every printer), "
+                         f"not {address!r}")
+    next_from = (s.get("next_from") or "").strip() or None
+    if next_from is not None and not valid_next_from(next_from):
+        raise ValueError(f"[network] next_from must be 'after', a host number (1-254) or an IPv4 address, "
+                         f"not {next_from!r}")
+    return {"address": address, "next_from": next_from}
+
+
+def read_network_config(path: str) -> dict:
+    """The checked [network] section of the config file (see network_settings)."""
+    cp = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
+    if not cp.read(path):
+        raise FileNotFoundError(path)
+    return network_settings(cp)
 
 
 def plan_addresses(path: str, lease_dir: str = LEASE_DIR, quiet: bool = False) -> list[tuple[dict, str]]:

@@ -531,7 +531,7 @@ def active_connection(iface: str) -> str | None:
 # Next free address (`address = next`)
 # ---------------------------------------------------------------------------
 NEXT_SPAN = 32          # how many addresses to look through from the start
-NEXT_FROM = "200"       # default start: .200, above where most routers hand out leases
+NEXT_FROM = "after"     # default start: just after the Pi's own address (next_from changes it)
 DEFEND_EVERY = 120      # seconds between checks for another device on a claimed address (warns only)
 ZERO_IP = b"\0" * 4
 
@@ -609,8 +609,8 @@ def next_start(host: str, prefix: int, next_from: str | None = NEXT_FROM) -> int
     """The first address to try for a `next` printer, as an int, or None for
     "just after the Pi's own address".
 
-    next_from is a host number (200 means .200 in the Pi's /24), a full IPv4
-    address, or "after". A start outside the Pi's subnet counts as "after".
+    next_from is "after" (the default), a host number (200 means .200 in the
+    Pi's /24) or a full IPv4 address. A start outside the Pi's subnet counts as "after".
     """
     v = (next_from or NEXT_FROM).strip().lower()
     if v == "after":
@@ -634,8 +634,9 @@ def next_candidates(host: str, prefix: int, taken: set[str], remembered: str | N
     """Addresses to try for a `next` printer, best first.
 
     The address this printer had on this network before (so the POS keeps
-    finding it), then up to span addresses upward from next_from (default .200),
-    then up to span addresses just after the Pi's own as a last resort. Stays
+    finding it), then up to span addresses upward from next_from if it's set,
+    then up to span addresses just after the Pi's own (the default start, and
+    the fallback when nothing from next_from up is free). Stays
     inside the subnet and skips the broadcast address and anything in taken
     (the Pi's addresses, the gateway, other printers).
     """
@@ -719,7 +720,7 @@ class AddressManager:
         self.next_start: dict[str, float] = {}
         self.next_check: dict[str, float] = {}
         self.fallback: set[str] = set()      # dhcp printers using `next` on this network
-        self.next_from: dict[str, str | None] = {}   # per-printer next_from from the config
+        self.next_from: str | None = None    # [network] next_from from the config (None: after the Pi)
         self.conflict: set[str] = set()      # `next` printers whose address another device answers for
         self.move_requests: set[str] = set() # printers to move, from the page's "Find another address"
         self.lock = threading.Lock()
@@ -740,7 +741,10 @@ class AddressManager:
             plist = [p for p in slb.read_printer_config(BRIDGE_CONF) if p["address"].lower() in ("dhcp", "next")]
         except (OSError, ValueError):
             return {}
-        self.next_from = {p["name"]: p.get("next_from") for p in plist}
+        try:
+            self.next_from = slb.read_network_config(BRIDGE_CONF)["next_from"]
+        except (OSError, ValueError):
+            self.next_from = None
         return {p["name"]: p["address"].lower() for p in plist}
 
     # -- network ------------------------------------------------------------
@@ -903,7 +907,7 @@ class AddressManager:
             taken.add(gw)
         remembered = load_claims().get(conn, {}).get(name)
         for cand in next_candidates(host[0], host[1], taken, remembered,
-                                    next_from=self.next_from.get(name)):
+                                    next_from=self.next_from):
             if arp_in_use(iface, cand):
                 log.info("next: %s is in use; trying the next address for %s", cand, name)
                 continue

@@ -6,14 +6,14 @@ number TSP143IIIBI; see [README, The printer](../README.md#the-printer-star-tsp1
 a SunMi D3 Pro running Next Order POS. Any Debian-based host with classic
 Bluetooth and Python 3.8+ should work the same way.
 
-Commands marked **Pi** run on the Pi; **client** means another machine on the
+Commands marked **Device** run on the device; **client** means another machine on the
 same network.
 
-## 1. Flash and reach the Pi
+## 1. Flash and reach the device
 
 Use Raspberry Pi Imager → Raspberry Pi OS Lite (64-bit). In *OS customisation*
 set a username, Wi-Fi network and country, and *Enable SSH → public-key
-authentication only* with your public key. Then find the Pi:
+authentication only* with your public key. Then find the device:
 
 ```bash
 # client (macOS shown): fill the ARP table, then look for Raspberry Pi MAC prefixes
@@ -22,15 +22,15 @@ for i in $(seq 1 254); do ping -c1 -W 300 $NET.$i >/dev/null 2>&1 & done; wait
 arp -an | grep -iE 'b8:27:eb|dc:a6:32|e4:5f:01|d8:3a:dd|2c:cf:67|28:cd:c1|88:a2:9e'
 ```
 
-POS apps store the printer by IP address, so keep the Pi's address stable. With
-**one printer per Pi**, give the Pi a DHCP reservation on the router. With
-**several printers**, don't reserve the Pi's MAC on routers like UniFi; see
+POS apps store the printer by IP address, so keep the device's address stable. With
+**one printer per device**, give the device a DHCP reservation on the router. With
+**several printers**, don't reserve the device's MAC on routers like UniFi; see
 [ADMIN.md, Router reservations](ADMIN.md#router-reservations).
 
 ## 2. Wi-Fi (if not set in Imager)
 
 ```bash
-# Pi
+# Device
 sudo nmcli radio wifi on
 nmcli dev wifi list
 sudo nmcli --ask dev wifi connect "<SSID>" ifname wlan0   # prompts for the passphrase
@@ -44,13 +44,13 @@ is unique to each printer. The only button on the back, **RST**, resets the
 printer; it isn't used for pairing. Disconnect any phone or tablet that's paired
 to it first, because it accepts a single connection.
 
-After pairing it with the Pi, Star recommends turning pairing off so no other
+After pairing it with the device, Star recommends turning pairing off so no other
 device can pair with the printer: in Star's **TSP100III Utility** app, open
 **Setting → Bluetooth Settings**, set **New Pairing Permission** to **OFF** and tap
-**Apply**. The Pi stays paired. To pair a new device later, set it back to ON.
+**Apply**. The device stays paired. To pair a new device later, set it back to ON.
 
 ```bash
-# Pi
+# Device
 sudo apt install -y bluez
 bluetoothctl power on
 bluetoothctl --timeout 30 scan bredr          # classic Bluetooth only
@@ -63,14 +63,14 @@ bluetoothctl info $M | grep -E 'Paired|Trusted|Serial Port'
 Find the SPP channel (usually 1):
 
 ```bash
-# Pi
+# Device
 sudo sdptool browse $M | grep -A8 -i "Serial Port" | grep -i Channel
 ```
 
 ## 4. Install the bridge
 
 ```bash
-# Pi
+# Device
 git clone https://github.com/rtfmoz2/star-lan-bridge.git
 cd star-lan-bridge
 sudo ./scripts/install.sh --mac $M --channel 1
@@ -79,7 +79,7 @@ sudo ./scripts/install.sh --mac $M --channel 1
 Check it:
 
 ```bash
-# Pi
+# Device
 systemctl is-active rfcomm-printer star-lan-bridge
 sudo ss -ltnup | grep -E '9100|9101|22222'
 journalctl -u star-lan-bridge -f
@@ -93,9 +93,9 @@ python3 tools/star_probe.py etb --host <printer-address>
 ```
 
 Expected `discover` output includes `model TSP143IIILAN (STR_T-001)` and the
-Pi's IP; `etb` shows the counter going from 0 to 1.
+device's IP; `etb` shows the counter going from 0 to 1.
 
-With no config file the bridge serves this one printer on all of the Pi's
+With no config file the bridge serves this one printer on all of the device's
 addresses. For a second printer, see [§7](#7-several-printers). To join Wi-Fi networks and see the
 addresses from a browser, see [ADMIN.md](ADMIN.md).
 
@@ -103,10 +103,10 @@ addresses from a browser, see [ADMIN.md](ADMIN.md).
 
 Download **Star CUPS Driver for Linux** (V3.16.0 used here) from Star's
 [TSP100III support page](https://starmicronics.com/support/products/tsp100iii-support-page/).
-It needs a Star account. Copy the `.tar` to the Pi, then:
+It needs a Star account. Copy the `.tar` to the device, then:
 
 ```bash
-# Pi
+# Device
 sudo ./scripts/setup-cups.sh --driver ~/Star_CUPS_Driver-3.16.0_linux.tar --queue TSP143
 echo "Hello" | lp -d TSP143
 ```
@@ -123,7 +123,7 @@ Adding the printer on clients:
 
 ## 6. Point the POS at it
 
-In the POS app, search for **Star LAN** printers, or add one by IP using the Pi's
+In the POS app, search for **Star LAN** printers, or add one by IP using the device's
 address. In Next Order POS 6.0.0, the printer showed as *connected* and printed
 with the app's TSP100III model set to either the W (Wi-Fi) or the LAN variant.
 
@@ -133,10 +133,11 @@ Each printer needs its own LAN address, because Star clients identify printers b
 IP and the ports (22222, 9100, 9101) are fixed. No address is fixed in the
 config, so the same configuration works on any venue network:
 
-* **One printer** uses the Pi's own DHCP address (`address = auto`).
-* **Each extra printer** uses a free address high in the range
-  (`address = next`): `.200` if no device answers on it, otherwise `.201`, and
-  so on (`next_from` changes the start). The `star-admin` service
+* **One printer** uses the device's own DHCP address (`address = auto`).
+* **Each extra printer** uses the next free address after the device's
+  (`address = next`): with the device on `.10`, `.11` if no device answers on it,
+  otherwise `.12`, and so on. `next_from` in the `[network]` section starts
+  the search elsewhere, such as `.200` ([CONFIG.md](CONFIG.md#next_from)). The `star-admin` service
   ([ADMIN.md](ADMIN.md)) checks, claims and remembers it, and the printer
   never moves by itself. This works with any router.
 * Or **its own DHCP lease** (`address = dhcp`), on routers that honour a
@@ -150,7 +151,7 @@ Steps:
    run `pairable on` in the same `bluetoothctl` session before `pair`.
 
    ```bash
-   # Pi
+   # device
    M2=00:11:62:DD:EE:FF
    { echo "pairable on"; sleep 1; echo "pair $M2"; sleep 15; echo "trust $M2"; sleep 3; echo quit; } | bluetoothctl
    sed -e "s/@PRINTER_MAC@/$M2/g" -e "s/@CHANNEL@/1/g" \
@@ -162,14 +163,14 @@ Steps:
 
 2. **Write `/etc/star-lan-bridge.conf`** from
    [examples/star-lan-bridge.conf](../examples/star-lan-bridge.conf): one
-   `[printer:NAME]` section per printer, `address = auto` for the first and
-   `address = next` (or `dhcp`) for the rest, each with its own `device` and `local`, and a
-   distinct `mac` for every printer after the first.
+   `[network]` section with `address = next`, which applies to every printer,
+   and one `[printer:NAME]` section per printer, each with its own `device`
+   and `local`, and a distinct `mac` for every printer after the first.
 
 3. **Install star-admin**, which keeps the extra addresses (and gives you the web page):
 
    ```bash
-   # Pi
+   # device
    sudo ./scripts/install-admin.sh
    sudo python3 /opt/star-lan-bridge/star_admin.py --set-password
    cat /run/star-lan-bridge/lease-TSP143-2        # ip=... once it has an address
@@ -179,7 +180,7 @@ Steps:
    address changes. Then point each CUPS queue at its printer's local address:
 
    ```bash
-   # Pi
+   # device
    sudo systemctl restart star-lan-bridge
    journalctl -u star-lan-bridge -n 10 -o cat     # one "listening on" line per printer
    sudo lpadmin -p TSP143-2 -E -v socket://127.0.0.2:9100 -m star/tsp143.ppd -o printer-is-shared=true
@@ -193,16 +194,16 @@ Steps:
    ```
 
 6. **Leave the addresses alone on the router.** They stay stable by
-   themselves. With `dhcp`, don't add a fixed IP for the Pi's MAC on UniFi or
+   themselves. With `dhcp`, don't add a fixed IP for the device's MAC on UniFi or
    other routers that reserve by MAC: it can apply to every printer's lease,
    because they all use that MAC. See
    [ADMIN.md, Router reservations](ADMIN.md#router-reservations).
 
-To try all of this on a spare Pi without printers, see [TESTING.md](TESTING.md).
+To try all of this on a spare device without printers, see [TESTING.md](TESTING.md).
 
 ## Uninstall
 
 ```bash
-# Pi: put CUPS back on the serial device, keep the rfcomm binding for it
+# Device: put CUPS back on the serial device, keep the rfcomm binding for it
 sudo ./scripts/uninstall.sh --cups-queue TSP143 --keep-rfcomm
 ```

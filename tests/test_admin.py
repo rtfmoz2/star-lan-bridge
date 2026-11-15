@@ -277,8 +277,11 @@ class NextCandidatesTest(unittest.TestCase):
         self.assertEqual(admin.next_candidates("192.168.50.252", 24, set(), next_from="after"), ["192.168.50.253", "192.168.50.254"])
 
 
-    def test_default_starts_at_200_then_after_host(self):
-        c = admin.next_candidates("192.168.50.10", 24, {"192.168.50.201"}, span=3)
+    def test_default_starts_just_after_host(self):
+        self.assertEqual(admin.next_candidates("192.168.50.10", 24, set(), span=2), ["192.168.50.11", "192.168.50.12"])
+
+    def test_next_from_200_then_after_host(self):
+        c = admin.next_candidates("192.168.50.10", 24, {"192.168.50.201"}, span=3, next_from="200")
         self.assertEqual(c, ["192.168.50.200", "192.168.50.202", "192.168.50.11", "192.168.50.12", "192.168.50.13"])
 
     def test_next_from_forms(self):
@@ -289,7 +292,8 @@ class NextCandidatesTest(unittest.TestCase):
         self.assertIsNone(s("192.168.50.10", 24, "after"))
         self.assertIsNone(s("192.168.50.10", 24, "10.0.0.5"))        # outside the subnet
         self.assertIsNone(s("192.168.50.10", 26, "200"))             # .200 isn't in a /26 at .0
-        self.assertEqual(admin.next_candidates("192.168.50.10", 26, set(), span=2), ["192.168.50.11", "192.168.50.12"])
+        self.assertEqual(admin.next_candidates("192.168.50.10", 26, set(), span=2, next_from="200"),
+                         ["192.168.50.11", "192.168.50.12"])
 
     def test_stops_before_broadcast_from_start(self):
         self.assertEqual(admin.next_candidates("192.168.50.10", 24, set(), span=60, next_from="250")[:6],
@@ -332,28 +336,28 @@ class AddressManagerTest(unittest.TestCase):
         admin.slb.LEASE_DIR = self.saved_lease_dir
 
     def test_takes_next_free_and_remembers_it(self):
-        self.busy = {"192.168.50.200"}
+        self.busy = {"192.168.50.11"}
         self.m.keep_next("TSP143-2", "wlan0", "conn-1")
-        self.assertEqual(admin.read_lease_file("TSP143-2")["ip"], "192.168.50.201")
+        self.assertEqual(admin.read_lease_file("TSP143-2")["ip"], "192.168.50.12")
         self.assertEqual(admin.read_lease_file("TSP143-2")["mode"], "next")
-        self.assertIn(["ip", "addr", "replace", "192.168.50.201/24", "dev", "wlan0", "noprefixroute"], self.calls)
-        self.assertEqual(admin.load_claims(), {"conn-1": {"TSP143-2": "192.168.50.201"}})
-        # After a reboot (records gone), it asks for .201 again even though .200 is free now.
+        self.assertIn(["ip", "addr", "replace", "192.168.50.12/24", "dev", "wlan0", "noprefixroute"], self.calls)
+        self.assertEqual(admin.load_claims(), {"conn-1": {"TSP143-2": "192.168.50.12"}})
+        # After a reboot (records gone), it asks for .12 again even though .11 is free now.
         os.unlink(os.path.join(self.dir, "lease-TSP143-2"))
         self.addrs = self.addrs[:1]
         self.busy = set()
         admin.AddressManager().keep_next("TSP143-2", "wlan0", "conn-1")
-        self.assertEqual(admin.read_lease_file("TSP143-2")["ip"], "192.168.50.201")
+        self.assertEqual(admin.read_lease_file("TSP143-2")["ip"], "192.168.50.12")
 
     def test_never_moves_when_another_device_turns_up(self):
         self.m.keep_next("TSP143-2", "wlan0", "conn-1")
-        self.assertEqual(admin.read_lease_file("TSP143-2")["ip"], "192.168.50.200")
-        self.busy = {"192.168.50.200"}
+        self.assertEqual(admin.read_lease_file("TSP143-2")["ip"], "192.168.50.11")
+        self.busy = {"192.168.50.11"}
         self.m.next_check["TSP143-2"] = 0
         with self.assertLogs(admin.log, "WARNING"):
             self.m.keep_next("TSP143-2", "wlan0", "conn-1")
-        self.assertNotIn(["ip", "addr", "del", "192.168.50.200/24", "dev", "wlan0"], self.calls)
-        self.assertEqual(admin.read_lease_file("TSP143-2")["ip"], "192.168.50.200")
+        self.assertNotIn(["ip", "addr", "del", "192.168.50.11/24", "dev", "wlan0"], self.calls)
+        self.assertEqual(admin.read_lease_file("TSP143-2")["ip"], "192.168.50.11")
         self.assertIn("Another device", self.m.notes["TSP143-2"])
         self.busy = set()
         self.m.next_check["TSP143-2"] = 0
@@ -364,27 +368,27 @@ class AddressManagerTest(unittest.TestCase):
         self.m.keep_next("TSP143-2", "wlan0", "conn-1")
         with self.assertRaises(ValueError):
             self.m.request_move("TSP143-2")            # no conflict: nothing to fix
-        self.busy = {"192.168.50.200"}
+        self.busy = {"192.168.50.11"}
         self.m.next_check["TSP143-2"] = 0
         with self.assertLogs(admin.log, "WARNING"):
             self.m.keep_next("TSP143-2", "wlan0", "conn-1")
         self.m.request_move("TSP143-2")
         with self.assertLogs(admin.log, "WARNING"):
             self.m.keep_next("TSP143-2", "wlan0", "conn-1")
-        self.assertIn(["ip", "addr", "del", "192.168.50.200/24", "dev", "wlan0"], self.calls)
-        self.assertEqual(admin.read_lease_file("TSP143-2")["ip"], "192.168.50.201")
-        self.assertEqual(admin.load_claims(), {"conn-1": {"TSP143-2": "192.168.50.201"}})
+        self.assertIn(["ip", "addr", "del", "192.168.50.11/24", "dev", "wlan0"], self.calls)
+        self.assertEqual(admin.read_lease_file("TSP143-2")["ip"], "192.168.50.12")
+        self.assertEqual(admin.load_claims(), {"conn-1": {"TSP143-2": "192.168.50.12"}})
         self.assertNotIn("TSP143-2", self.m.conflict)
 
-    def test_next_from_after_keeps_old_behaviour(self):
-        self.m.next_from["TSP143-2"] = "after"
+    def test_next_from_moves_the_start(self):
+        self.m.next_from = "200"
         self.m.keep_next("TSP143-2", "wlan0", "conn-1")
-        self.assertEqual(admin.read_lease_file("TSP143-2")["ip"], "192.168.50.11")
+        self.assertEqual(admin.read_lease_file("TSP143-2")["ip"], "192.168.50.200")
 
     def test_two_next_printers_get_different_addresses(self):
         self.m.keep_next("B", "wlan0", "conn-1")
         self.m.keep_next("C", "wlan0", "conn-1")
-        self.assertEqual([admin.read_lease_file(n)["ip"] for n in "BC"], ["192.168.50.200", "192.168.50.201"])
+        self.assertEqual([admin.read_lease_file(n)["ip"] for n in "BC"], ["192.168.50.11", "192.168.50.12"])
         self.assertEqual(self.m.host_ip("wlan0"), ("192.168.50.10", 24))
 
     def test_clash_switches_to_next(self):

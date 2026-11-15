@@ -2,7 +2,7 @@
 
 [`tools/mock_printer.py`](../tools/mock_printer.py) stands in for a Bluetooth
 TSP100III so the bridge can be tested without printers. For how to run it on
-a test Pi, see [TESTING.md](TESTING.md).
+a test device, see [TESTING.md](TESTING.md).
 
 The bridge never talks to the printer directly. It opens a device file,
 `/dev/rfcomm0`, reads and writes bytes, and the kernel carries those bytes over

@@ -4,27 +4,30 @@
 
 Second printers on routers that ignore DHCP client IDs.
 
-* **`address = next`:** a printer takes the first free address from .200 up
-  (.200 if nothing answers on it, else .201, ...), where routers rarely hand
-  out leases. `next_from` sets the start: a host number, a full address, or
-  `after` for just after the Pi's own. star-admin checks with ARP probes and
+* **`address = next`:** a printer takes the next free address after the
+  device's own (device on .10: .11 if nothing answers on it, else .12, ...).
+  A new `[network]` section holds settings for all printers: `address = next`
+  (or `dhcp`) there applies to every printer that doesn't set its own, and
+  `next_from` starts the search elsewhere, such as 200 (.200) or a full
+  address; above the router's DHCP range is best. star-admin checks with ARP probes and
   remembers the address per Wi-Fi network, so the printer gets it back after
   a reboot. A printer never moves by itself: if another device also answers
   for its address, the admin page warns under the printer and offers a
   **Find another address** button. Works with any router and needs no fixed
-  address. The example config now uses it for printer 2.
+  address. The example config now sets `address = next` in `[network]`, for
+  every printer.
 * **`address = dhcp` falls back to `next`** when the router hands back the
-  Pi's own address (it leases by MAC and ignores the client ID). The DHCP hook
+  device's own address (it leases by MAC and ignores the client ID). The DHCP hook
   refuses such a lease, and the admin page says why under the printer.
 * **One clash no longer stops every printer.** A printer whose address is
   already taken by another is skipped with an error in the log, and the rest
   are served. Before, the bridge exited and systemd restarted it in a loop,
   so no printer worked.
-* **`address = auto` uses the Pi's own DHCP address**, as recorded by
+* **`address = auto` uses the device's own DHCP address**, as recorded by
   star-admin, not simply the interface's first address. Adding a static or
   printer address to the interface can no longer move printer 1.
 * **`tools/mock_printer.py`:** a stand-in for a Bluetooth TSP100III on a
-  pseudo-terminal, for testing a Pi with no printers (docs/TESTING.md). The
+  pseudo-terminal, for testing a device with no printers (docs/TESTING.md). The
   bridge treats any device that isn't an RFCOMM TTY as always connected, and
   the admin page shows such a printer as connected while the bridge answers
   for it.
@@ -32,10 +35,10 @@ Second printers on routers that ignore DHCP client IDs.
   device" or the printer's name, with its source in brackets: DHCP, next
   available or fixed.
 * **`tools/collect-wifi-logs.sh`:** one archive of everything needed to see why
-  the Pi didn't join a Wi-Fi network (logs per boot, saved networks with names
-  in hex, what the Pi can see, Wi-Fi country), without passwords; `--debug-on`
+  the device didn't join a Wi-Fi network (logs per boot, saved networks with names
+  in hex, what the device can see, Wi-Fi country), without passwords; `--debug-on`
   and `--debug-off` switch NetworkManager's detailed Wi-Fi logging.
-* **Docs:** troubleshooting for a Pi that won't join the venue Wi-Fi, a bridge
+* **Docs:** troubleshooting for a device that won't join the venue Wi-Fi, a bridge
   stuck restarting, a printer whose address another device is using, and a
   printer that moved address; the phone-hotspot
   fallback in ADMIN.md; how the mock printer works (docs/MOCK.md); the config
@@ -74,7 +77,7 @@ Hardening for commercial deployment.
 * **docs:** new LOGS.md: where each part logs, everyday journalctl recipes,
   logs from before a power cut, copying logs to a laptop, and what the
   important lines mean.
-* **docs:** corrected the DHCP reservation advice. A fixed IP for the Pi's MAC
+* **docs:** corrected the DHCP reservation advice. A fixed IP for the device's MAC
   on UniFi and other MAC-based routers can capture every printer lease, so
   with several printers, leave the leases as plain DHCP (ADMIN.md, "Router
   reservations").
@@ -88,12 +91,12 @@ Hardening for commercial deployment.
   `STAR_TEST_TIME_SCALE` stretches the fuzz tests' waits for slow machines.
 * **Admin page:** never shows cached data. Responses can't be cached, the page
   refreshes when it comes back into view, and it shows when it last updated
-  (or a warning if the Pi can't be reached). Routes ignore query strings.
+  (or a warning if the device can't be reached). Routes ignore query strings.
 
 ## 0.3.0 (2026-11-14)
 
 * **Web admin page (`star_admin.py`, `star-admin.service`).** At
-  `http://<hostname or IP address>`, password-protected: shows the Pi's network and
+  `http://<hostname or IP address>`, password-protected: shows the device's network and
   addresses and each printer's address, Bluetooth link and status (ready, out
   of paper, switched off); scans for Wi-Fi and joins a network now or saves it
   for later; forgets saved networks. See docs/ADMIN.md.
