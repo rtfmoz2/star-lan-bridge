@@ -119,7 +119,7 @@ and give each printer its own address; see [SETUP.md §7](docs/SETUP.md#7-severa
   logs, everyday recipes, logs from before a power cut, copying them to a
   laptop, and what the important lines mean
 * **[docs/TESTING.md](docs/TESTING.md)**: testing a Pi with mock printers
-  instead of real ones
+  instead of real ones; [docs/MOCK.md](docs/MOCK.md) explains how the mock works
 * **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)**: duplicate prints,
   "not connected", slow CUPS jobs, Bluetooth link and pairing errors, a second
   printer that doesn't show up, paper-out status
