@@ -252,6 +252,15 @@ class ConfigTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             bridge.read_printer_config(self.write("[printer:a]\naddress=dhcp\n"))  # no device
 
+    def test_next_from_option(self):
+        conf = "[printer:a]\ndevice=/dev/rfcomm0\naddress=next\nnext_from = %s\n"
+        for ok in ("200", "after", "192.168.50.230"):
+            self.assertEqual(bridge.read_printer_config(self.write(conf % ok))[0]["next_from"], ok)
+        for bad in ("0", "255", "high", "10.0.0"):
+            with self.assertRaises(ValueError):
+                bridge.read_printer_config(self.write(conf % bad))
+        self.assertIsNone(bridge.read_printer_config(self.write("[printer:a]\ndevice=/dev/rfcomm0\naddress=next\n"))[0]["next_from"])
+
     def test_single_printer_mode_listens_everywhere(self):
         st = bridge.Station("printer", "/dev/rfcomm0")
         self.assertEqual(st.listen_addrs(), ["0.0.0.0"])

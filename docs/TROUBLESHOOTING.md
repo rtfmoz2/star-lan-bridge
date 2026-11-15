@@ -87,20 +87,50 @@ itself. Better still, set `address = next` for every extra printer (see
 [ADMIN.md, How printer addresses work](ADMIN.md#how-printer-addresses-work)).
 No fixed address is needed.
 
+## The admin page says another device is using a printer's address
+
+**Symptom:** under a printer, the **Printers** section says *Another device is
+also using …* and shows a **Find another address** button. Printing to that
+printer may fail or go missing, because two devices answer on one address.
+
+**Cause:** with `address = next`, the printer's address is one the router
+doesn't know about, and the router (or someone setting a fixed address) gave
+it to another device too. The printer never moves by itself, because the POS
+stores its address. star-admin logs it every time it notices:
+
+```
+WARNING next: another device is also using <address>; TSP143-2 keeps it. Give that device another address, or reserve <address> in the router
+```
+
+**Fix**, either:
+
+* **Move the other device** (give it another address, or restart it so it
+  asks the router again). The warning clears within two minutes and nothing
+  changes in the POS.
+* **Press Find another address** under the printer, then press it again to
+  confirm. The printer takes the next free address within a few seconds and
+  the bridge restarts on it. Then delete the printer in the POS and add it
+  again at the new address (see the next section).
+
+To stop it happening again, end the router's DHCP range below the printers'
+addresses, or set `next_from` above it (see
+[ADMIN.md, `next`](ADMIN.md#next-the-next-free-address)).
+
 ## A printer moved to a new address and the POS can't print to it
 
 **Symptom:** printing to one printer fails after it was working. The admin
 page shows it on a different address from the one saved in the POS.
 
-**Cause:** with `address = next`, a printer moves only when another device
-turns up on its address. star-admin logs it:
+**Cause:** with `address = next`, a printer moves only when someone presses
+**Find another address** on the admin page, or after a power cut if another
+device took its address while the Pi was off. star-admin logs it:
 
 ```bash
 journalctl -u star-admin | grep "next:"
 ```
 
 ```
-WARNING next: another device is now using <old-address>; moving TSP143-2 to another address
+WARNING next: moving TSP143-2 off <old-address>, as asked on the admin page; select it again in the POS
 INFO next: TSP143-2 is using <new-address>/24 on wlan0
 ```
 
@@ -208,7 +238,7 @@ bluetoothctl info <MAC> | grep -E "Paired|Bonded|Trusted"     # all three: yes
   ignores the client ID makes the printer use `next`); check for a fixed
   address in the config that matches another printer's.
 * Does the page say the router gives every printer the Pi's own address? It
-  leases by MAC only, so the printer uses the next free address instead. That
+  leases by MAC only, so the printer uses `next` instead (from `.200` up). That
   works; set `address = next` to skip the DHCP attempt.
 * From another machine, `python3 tools/star_probe.py discover` should get one
   reply per printer, and `discover --host <address>` only that printer.

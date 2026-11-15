@@ -16,8 +16,8 @@ the Pi has.
 
 | Section | What it shows or does |
 |---|---|
-| **Network** | Current Wi-Fi network and signal, every IP address on the Pi (marked DHCP or fixed), the gateway |
-| **Printers** | Each printer's address to enter in the POS, how it got that address, Bluetooth link, status (Ready, Out of paper, Switched off or out of Bluetooth range) and its CUPS URL |
+| **Network** | Current Wi-Fi network and signal, every IP address on the Pi with whose it is ("this device" or a printer) and its source (DHCP, next available or fixed), the gateway |
+| **Printers** | Each printer's address to enter in the POS, how it got that address, Bluetooth link, status (Ready, Out of paper, Switched off or out of Bluetooth range) and its CUPS URL. A warning and a **Find another address** button if another device is using the printer's address |
 | **Join a Wi-Fi network** | Scan, tap a network, enter its password, then **Connect now** or **Save for later** |
 | **Saved networks** | Networks the Pi will join on its own; **Forget** removes one (not the one in use) |
 
@@ -73,15 +73,30 @@ No address is fixed: each one comes from DHCP or is found free on the network.
 | Config (`/etc/star-lan-bridge.conf`) | Address used |
 |---|---|
 | `address = auto` | The Pi's own DHCP address on the network it's using. Use this for one printer. |
-| `address = next` | The first free address after the Pi's own. **Works with any router.** |
+| `address = next` | A free address high in the range, from .200 up. **Works with any router.** |
 | `address = dhcp` | The printer's own DHCP lease. Falls back to `next` on routers that can't do it. |
 
 ### `next`: the next free address
 
-With the Pi on `.10`, star-admin checks whether any device is using `.11`. If
-none is, the printer gets `.11`; otherwise it tries `.12`, and so on, up to 32
-addresses past the Pi's own. A second `next` printer takes the next free one
-after that.
+star-admin checks whether any device is using `.200`. If none is, the printer
+gets `.200`; otherwise it tries `.201`, and so on, up to 32 addresses. A second
+`next` printer takes the next free one after that. Routers usually hand out
+leases from the bottom of their range, so the top end is the least likely to
+clash. If nothing from `.200` up is free, it tries the addresses just after the
+Pi's own.
+
+Set where it starts with `next_from` in the printer's section:
+
+| `next_from` | First address tried |
+|---|---|
+| *(not set)* or `200` | `.200` in the Pi's /24. Any host number from 1 to 254 works the same way. |
+| `192.168.50.230` | That address, if it's on the Pi's network. |
+| `after` | Just after the Pi's own address (Pi on `.10`: `.11`), as before 0.5.0. |
+
+Best of all, pick a start above the end of the router's DHCP range, if you can
+see it in the router's settings: the router then never hands out the
+printers' addresses. A printer that already has an address keeps it when
+`next_from` changes; use **Find another address** (below) to move it.
 
 * **How it checks:** an ARP probe (RFC 5227), sent from the Pi's Wi-Fi. Every
   device on the network answers ARP for its own address, even phones and
@@ -90,16 +105,19 @@ after that.
   `/var/lib/star-admin/claims.json`. After a reboot, or if the Pi's own
   address changes, the printer asks for the same address first, so the POS
   keeps finding it. It only moves if a device is using that address.
-* **If a device turns up on it later:** star-admin checks every two minutes.
-  If another device answers for the printer's address, the printer moves to the
-  next free one and the bridge restarts on it. It answers the POS's printer
-  search at the new address straight away; select it again there if the POS
-  stored the old address. The log says `next: another device is now using …`.
+* **It never moves by itself.** The POS stores each printer's address, so a
+  printer keeps its address once it has one. star-admin checks every two
+  minutes whether another device also answers for it. If one does, it logs
+  `next: another device is also using …` and the **Printers** section shows a
+  warning under that printer, with a **Find another address** button. Either
+  give the other device a different address, or press the button (twice, to
+  confirm): the printer takes the next free address and the bridge restarts on
+  it. Then delete the printer in the POS and add it again at the new address.
 * **The router doesn't know about it.** It's a free address the router could
   still hand to a new device. Most routers check an address is unused before
-  handing it out, and the Pi answers for it, so this rarely happens; if it
-  does, the check above moves the printer. Where the router lets you, shrink
-  its DHCP range so it ends below the Pi's addresses, or reserve them.
+  handing it out, and the Pi answers for it, so this rarely happens. Starting
+  at `.200` makes it rarer still. Where the router lets you, end its DHCP range
+  below the printers' addresses, or reserve them.
 
 ### `dhcp`: the printer's own lease
 
