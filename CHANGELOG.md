@@ -28,6 +28,13 @@ Second printers on routers that ignore DHCP client IDs.
 * **Admin page:** each address on an interface says whose it is, "this
   device" or the printer's name, with its source in brackets: DHCP, next
   available or fixed.
+* **`tools/collect-wifi-logs.sh`:** one archive of everything needed to see why
+  the Pi didn't join a Wi-Fi network (logs per boot, saved networks with names
+  in hex, what the Pi can see, Wi-Fi country), without passwords; `--debug-on`
+  and `--debug-off` switch NetworkManager's detailed Wi-Fi logging.
+* **Docs:** troubleshooting for a Pi that won't join the venue Wi-Fi, a bridge
+  stuck restarting, and a printer that moved address; the phone-hotspot
+  fallback in ADMIN.md; how the mock printer works (docs/MOCK.md).
 
 ## 0.4.0 (2026-11-14)
 

@@ -133,6 +133,7 @@ star_admin.py                 web admin: join Wi-Fi, show addresses, keep printe
 star-dhcp-alias.sh            udhcpc hook that adds a printer's leased address
 tools/star_probe.py           read-only StarIO client: discover / status / etb
 tools/mock_printer.py         stand-in printer on a pty, for testing without printers
+tools/collect-wifi-logs.sh    gather Wi-Fi logs and settings (no passwords) when the Pi won't join
 examples/star-lan-bridge.conf two-printer config (/etc/star-lan-bridge.conf)
 systemd/star-lan-bridge.service
 systemd/star-admin.service    web admin on port 80

@@ -35,7 +35,7 @@ The installer also advertises the page over Bonjour as *Printer bridge on
 
 ## Moving the Pi to a new venue
 
-There is no setup hotspot. Use one of these:
+The Pi doesn't run a setup hotspot of its own. Use one of these:
 
 1. **Save the venue's network before you leave.** On the current network, open the
    page, enter the venue's Wi-Fi name and password, and choose **Save for later**.
@@ -43,6 +43,17 @@ There is no setup hotspot. Use one of these:
 2. **Use a cable at the venue.** Plug the Pi's Ethernet port into the venue's
    router or switch, open `http://<hostname or IP address>` from a device on that
    network, and choose **Connect now**.
+3. **Keep a phone hotspot saved as a fallback.** Before you leave, turn on
+   your phone's hotspot and save it on the page like any other network. If the
+   Pi doesn't join the venue network, turn the hotspot on: the Pi joins the
+   phone, and the page opens on the same phone. Tap the venue network in the
+   scan list (that copies its name exactly), enter the password and choose
+   **Connect now**, then turn the hotspot off. Saved networks keep their
+   passwords, so the hotspot doesn't replace the others.
+
+Wi-Fi names must match exactly, including spaces and capitals. If the Pi still
+won't join, see
+[TROUBLESHOOTING.md](TROUBLESHOOTING.md#the-pi-doesnt-join-the-venues-wi-fi).
 
 After **Connect now**:
 
