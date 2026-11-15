@@ -10,7 +10,7 @@ with its source:
 
 | Tag | Meaning |
 |---|---|
-| **[observed]** | Seen directly in packet captures and bridge logs while building this project (Next Order POS 6.0.0 on a SunMi D3 Pro, two Bluetooth TSP143IIIBI printers on one Pi, macOS CUPS). |
+| **[observed]** | Seen directly in packet captures and bridge logs while building this project (Next Order POS 6.0.0 on a SunMi D3 Pro, two Bluetooth TSP100III printers (model TSP143IIIBI) on one Pi, macOS CUPS). |
 | **[reference]** | From the reverse-engineering notes in [gnaunited/tsp143-bridge](https://github.com/gnaunited/tsp143-bridge) (captured from a real TSP100IIILAN, firmware V2.2). |
 | **[Star]** | From Star Micronics' published command manuals (StarPRNT / Star Line Mode command specifications, ASB specification). |
 | **[unconfirmed]** | Seen but not decoded. Don't rely on it. |
@@ -146,7 +146,7 @@ own DHCP lease, requested with the Pi's MAC and a per-printer DHCP client ID
   address. Linux delivers it to the socket bound to that exact address rather
   than the `0.0.0.0` socket.
 
-Verified with two TSP143IIIBI printers, first with a fixed second address and
+Verified with two TSP100III Bluetooth printers, first with a fixed second address and
 then with only DHCP: printer 1 on the Pi's own DHCP address and printer 2 on its
 own DHCP lease from a UniFi router. A broadcast got two replies,
 one per printer and each from its own address, and a unicast got only its own
@@ -205,7 +205,7 @@ and bit 3 of byte 5 set (`08`), in LAN shape
 reads to warn about paper; the job was still accepted on 9100 and logged as
 finished.
 
-Observed on the Bluetooth TSP143IIIBI over `/dev/rfcomm0`:
+Observed on the Bluetooth TSP100III (TSP143IIIBI) over `/dev/rfcomm0`:
 
 ```
 ESC ACK SOH            ->  23 06 00 00 00 00 00 00 00
