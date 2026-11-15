@@ -38,9 +38,16 @@ sudo nmcli --ask dev wifi connect "<SSID>" ifname wlan0   # prompts for the pass
 
 ## 3. Pair the printer
 
-Hold **PAIR** on the back of the TSP100III for about 5 seconds, until the blue LED
-flashes. Disconnect any phone or tablet that's paired to it, because it accepts a
-single connection.
+The TSP100III Bluetooth needs no button press: once it's switched on (blue LED
+lit), it accepts pairing and shows up as **`TSP100-XXXXX`**, where the last part
+is unique to each printer. The only button on the back, **RST**, resets the
+printer; it isn't used for pairing. Disconnect any phone or tablet that's paired
+to it first, because it accepts a single connection.
+
+After pairing it with the Pi, Star recommends turning pairing off so no other
+device can pair with the printer: in Star's **TSP100III Utility** app, open
+**Setting → Bluetooth Settings**, set **New Pairing Permission** to **OFF** and tap
+**Apply**. The Pi stays paired. To pair a new device later, set it back to ON.
 
 ```bash
 # Pi
