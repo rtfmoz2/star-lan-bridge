@@ -12,6 +12,11 @@
 # and record it in $LEASE_DIR/lease-$PRINTER, where the bridge and the admin
 # page read it. On failure: remove the address and the record.
 #
+# A lease for an address the interface already has (normally the Pi's own) is
+# refused: the router is handing out addresses by MAC and ignoring the client
+# ID. The hook records that in $LEASE_DIR/clash-$PRINTER, and star-admin
+# switches the printer to the next free address instead.
+#
 # Nothing else is configured: no routes, DNS or hostname changes.
 
 # $ip, $mask, $lease, $router, $serverid and $interface come from udhcpc's
@@ -42,6 +47,15 @@ case "$1" in
         case "$mask" in ''|*[!0-9]*) mask=24 ;; esac
         life="${lease:-3600}"
         case "$life" in ''|*[!0-9]*) life=3600 ;; esac
+        if [ "$old" != "$ip" ] && ip -4 -o addr show dev "$interface" | grep -qF " inet $ip/"; then
+            if [ -n "$old" ]; then
+                ip addr del "$old/$oldmask" dev "$interface" 2>/dev/null
+                rm -f "$F"
+            fi
+            printf 'ip=%s\ninterface=%s\n' "$ip" "$interface" > "$DIR/clash-$PRINTER"
+            logger -t star-dhcp "$PRINTER: refusing $ip on $interface: the interface already has it (router ignores the client ID)"
+            exit 0
+        fi
         if [ -n "$old" ] && [ "$old" != "$ip" ]; then
             ip addr del "$old/$oldmask" dev "$interface" 2>/dev/null
         fi

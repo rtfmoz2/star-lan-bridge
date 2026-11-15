@@ -38,10 +38,10 @@ IPAddressAllow=localhost link-local multicast 10.0.0.0/8 172.16.0.0/12 192.168.0
 # DHCP (printer leases) uses the unspecified and limited-broadcast addresses.
 IPAddressAllow=0.0.0.0/32 255.255.255.255/32
 # Root, but only with the capabilities it needs: port 80, adding printer
-# addresses (ip addr) and DHCP's raw sockets (udhcpc).
+# addresses (ip addr) and raw sockets for DHCP (udhcpc) and ARP probes (`next`).
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_ADMIN CAP_NET_RAW
 PrivateDevices=yes
-# AF_PACKET: udhcpc; AF_NETLINK: ip addr; AF_BLUETOOTH: rfcomm link state.
+# AF_PACKET: udhcpc and ARP probes; AF_NETLINK: ip addr; AF_BLUETOOTH: rfcomm link state.
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK AF_PACKET AF_BLUETOOTH
 # Files it writes: new Wi-Fi profiles, its password file and printer lease records.
 ReadWritePaths=/etc/NetworkManager/system-connections /etc/star-admin
@@ -49,6 +49,10 @@ ReadWritePaths=/etc/NetworkManager/system-connections /etc/star-admin
 RuntimeDirectory=star-lan-bridge
 RuntimeDirectoryMode=0755
 RuntimeDirectoryPreserve=yes
+# /var/lib/star-admin: which `next` address each printer had on each network,
+# so a printer gets the same one back after a reboot.
+StateDirectory=star-admin
+StateDirectoryMode=0755
 
 [Install]
 WantedBy=multi-user.target

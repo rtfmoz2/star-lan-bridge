@@ -130,16 +130,18 @@ with the app's TSP100III model set to either the W (Wi-Fi) or the LAN variant.
 ## 7. Several printers
 
 Each printer needs its own LAN address, because Star clients identify printers by
-IP and the ports (22222, 9100, 9101) are fixed. Addresses come from DHCP, so the
-same configuration works on any venue network:
+IP and the ports (22222, 9100, 9101) are fixed. No address is fixed in the
+config, so the same configuration works on any venue network:
 
 * **One printer** uses the Pi's own DHCP address (`address = auto`).
-* **Each extra printer** gets its own DHCP lease (`address = dhcp`). The
-  `star-admin` service ([ADMIN.md](ADMIN.md)) requests it with BusyBox `udhcpc`,
-  using the Pi's MAC (Wi-Fi access points only accept that one) and a separate
-  DHCP **client ID** per printer, which routers treat as a separate device.
-  The client ID is fixed per Pi and printer, so the router keeps giving back the
-  same address.
+* **Each extra printer** uses the next free address after the Pi's
+  (`address = next`): with the Pi on `.10`, `.11` if no device answers on it,
+  otherwise `.12`, and so on. The `star-admin` service ([ADMIN.md](ADMIN.md))
+  checks, claims and remembers it, so the printer keeps the same address. This
+  works with any router.
+* Or **its own DHCP lease** (`address = dhcp`), on routers that honour a
+  separate DHCP client ID per printer, UniFi included. On routers that don't,
+  the printer falls back to `next` by itself.
 
 Steps:
 
@@ -161,16 +163,16 @@ Steps:
 2. **Write `/etc/star-lan-bridge.conf`** from
    [examples/star-lan-bridge.conf](../examples/star-lan-bridge.conf): one
    `[printer:NAME]` section per printer, `address = auto` for the first and
-   `address = dhcp` for the rest, each with its own `device` and `local`, and a
+   `address = next` (or `dhcp`) for the rest, each with its own `device` and `local`, and a
    distinct `mac` for every printer after the first.
 
-3. **Install star-admin**, which keeps the extra leases (and gives you the web page):
+3. **Install star-admin**, which keeps the extra addresses (and gives you the web page):
 
    ```bash
    # Pi
    sudo ./scripts/install-admin.sh
    sudo python3 /opt/star-lan-bridge/star_admin.py --set-password
-   cat /run/star-lan-bridge/lease-TSP143-2        # ip=... once the lease arrives
+   cat /run/star-lan-bridge/lease-TSP143-2        # ip=... once it has an address
    ```
 
 4. **Restart the bridge once.** After that it restarts by itself whenever an
@@ -190,14 +192,13 @@ Steps:
    python3 tools/star_probe.py status --host <printer-2-address>
    ```
 
-6. **Leave the leases as plain DHCP.** They stay stable by themselves. Don't
-   add a fixed IP for the Pi's MAC on UniFi or other routers that reserve by
-   MAC: it can apply to every printer's lease, because they all use that MAC.
-   See [ADMIN.md, Router reservations](ADMIN.md#router-reservations).
+6. **Leave the addresses alone on the router.** They stay stable by
+   themselves. With `dhcp`, don't add a fixed IP for the Pi's MAC on UniFi or
+   other routers that reserve by MAC: it can apply to every printer's lease,
+   because they all use that MAC. See
+   [ADMIN.md, Router reservations](ADMIN.md#router-reservations).
 
-If a router hands out leases by MAC address only, every client ID gets the
-Pi's own address. The page then shows printer 2 with the same address as
-printer 1; that network can't run more than one printer per Pi.
+To try all of this on a spare Pi without printers, see [TESTING.md](TESTING.md).
 
 ## Uninstall
 

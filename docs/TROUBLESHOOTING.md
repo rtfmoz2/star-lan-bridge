@@ -96,13 +96,20 @@ bluetoothctl info <MAC> | grep -E "Paired|Bonded|Trusted"     # all three: yes
 * Does the bridge know about it? At start it logs one
   `[NAME] bridge: listening on <address>, <local> ...` line per printer.
   If only one appears, check `/etc/star-lan-bridge.conf`.
-* Does it have a DHCP lease? `cat /run/star-lan-bridge/lease-<NAME>` should
-  show `ip=...`, and `journalctl -t star-dhcp` shows each lease. With none, check
-  that `star-admin` is running (`systemctl status star-admin`). Until a lease
-  arrives, the bridge logs `no address yet (address = dhcp)` and skips that
-  printer; it restarts by itself when the lease appears.
-* Same address as printer 1? The router leases by MAC only and ignores the DHCP
-  client ID, so this network can't run two printers on one Pi.
+* Does it have an address? `cat /run/star-lan-bridge/lease-<NAME>` should
+  show `ip=...`; `journalctl -t star-dhcp` shows each DHCP lease and
+  `journalctl -u star-admin | grep next:` each `next` address. With none, check
+  that `star-admin` is running (`systemctl status star-admin`). Until it has
+  one, the bridge logs `no address yet` and skips that printer; it restarts by
+  itself when the address appears.
+* Does the log say `address … is already used by printer …`? Two printers
+  ended up with the same address, so the bridge serves the first and skips the
+  other. With `address = dhcp` this shouldn't happen any more (a router that
+  ignores the client ID makes the printer use `next`); check for a fixed
+  address in the config that matches another printer's.
+* Does the page say the router gives every printer the Pi's own address? It
+  leases by MAC only, so the printer uses the next free address instead. That
+  works; set `address = next` to skip the DHCP attempt.
 * From another machine, `python3 tools/star_probe.py discover` should get one
   reply per printer, and `discover --host <address>` only that printer.
 * Has the address changed? After a long power-off or on a new network, a

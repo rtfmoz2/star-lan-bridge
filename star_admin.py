@@ -38,6 +38,7 @@ import hashlib
 import hmac
 import html
 import http.server
+import ipaddress
 import json
 import logging
 import os
@@ -45,6 +46,7 @@ import re
 import secrets
 import socket
 import signal
+import struct
 import subprocess
 import sys
 import threading
@@ -59,6 +61,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import star_lan_bridge as slb  # noqa: E402
 
 AUTH_FILE = "/etc/star-admin/auth.json"
+CLAIMS_FILE = "/var/lib/star-admin/claims.json"   # `next` addresses, remembered per network
 BRIDGE_CONF = "/etc/star-lan-bridge.conf"
 NM_DIR = "/etc/NetworkManager/system-connections"
 WIFI_IFACE = "wlan0"
@@ -269,6 +272,11 @@ BT_LABELS = {"connected": "connected", "config": "connecting", "connect": "conne
              "closed": "not connected", "clean": "not connected", "bound": "not connected"}
 
 
+def is_bluetooth_device(path: str) -> bool:
+    """True for an RFCOMM TTY, the same test the bridge uses (Printer.link_state)."""
+    return os.path.basename(os.path.realpath(path)).startswith("rfcomm")
+
+
 def read_status_frame(host: str, timeout: float = 1.5) -> bytes | None:
     """Ask the bridge for a printer's status over TCP 9101, exactly as a POS does."""
     try:
@@ -306,17 +314,22 @@ def describe_status(frame: bytes | None) -> dict:
     return {"state": "ok", "text": "Ready", "raw": raw}
 
 
-def read_lease_file(name: str) -> dict:
-    """The lease record star-dhcp-alias.sh keeps for a printer, or {}."""
+def read_lease_file_at(path: str) -> dict:
+    """key=value lines from a record file, or {}."""
     out = {}
     try:
-        with open(os.path.join(slb.LEASE_DIR, f"lease-{name}")) as f:
+        with open(path) as f:
             for line in f:
                 k, _, v = line.strip().partition("=")
                 out[k] = v
     except OSError:
         pass
     return out
+
+
+def read_lease_file(name: str) -> dict:
+    """The address record star-admin keeps for a printer (`dhcp` or `next`), or {}."""
+    return read_lease_file_at(os.path.join(slb.LEASE_DIR, f"lease-{name}"))
 
 
 def printers() -> list[dict]:
@@ -330,7 +343,10 @@ def printers() -> list[dict]:
         mode = p["address"].lower()
         resolved = slb.resolve_address(p["name"], p["address"])
         info = {"name": p["name"], "device": p["device"], "local": p["local"] or "",
-                "address": resolved or "", "mode": mode if mode in ("auto", "dhcp") else "fixed"}
+                "address": resolved or "", "mode": mode if mode in ("auto", "dhcp", "next") else "fixed"}
+        note = ADDR.notes.get(p["name"])
+        if note:
+            info["note"] = note
         if mode == "dhcp":
             lease = read_lease_file(p["name"])
             if lease.get("obtained") and lease.get("lease"):
@@ -342,6 +358,33 @@ def printers() -> list[dict]:
     return out
 
 
+def label_addresses(ifaces: list[dict], plist: list[dict]) -> list[dict]:
+    """Say whose each address is: the Pi's own ("this device") or a printer's (its name).
+
+    Also names the kind: "DHCP", "next available" (claimed by star-admin for a
+    printer with address = next) or "fixed".
+    """
+    host = read_lease_file_at(os.path.join(slb.LEASE_DIR, "host"))
+    by_ip = {}
+    for p in plist:
+        if p.get("address"):
+            by_ip.setdefault(p["address"], []).append(p)
+    out = []
+    for i in ifaces:
+        addrs = []
+        for a in i["addresses"]:
+            owners = by_ip.get(a["ip"], [])
+            names = [p["name"] for p in owners]
+            is_host = host.get("ip") == a["ip"] and host.get("interface") == i["name"]
+            if is_host:
+                names.insert(0, "this device")
+            kind = "next available" if any(p.get("mode") == "next" for p in owners) and not a["dhcp"] \
+                else ("DHCP" if a["dhcp"] else "fixed")
+            addrs.append({**a, "owner": ", ".join(names), "kind": kind})
+        out.append({**i, "addresses": addrs})
+    return out
+
+
 def status() -> dict:
     route = default_route()
     links = rfcomm_states()
@@ -349,7 +392,12 @@ def status() -> dict:
     for p in printers():
         frame = read_status_frame(p["local"] or p["address"] or "127.0.0.1")
         link = links.get(p["device"], {})
-        bt = BT_LABELS.get(link.get("state", ""), "not set up")
+        if is_bluetooth_device(p["device"]):
+            bt = BT_LABELS.get(link.get("state", ""), "not set up")
+        else:
+            # A serial port or tools/mock_printer.py: no Bluetooth link to show,
+            # so it counts as connected while the bridge answers for it.
+            bt = "connected" if frame else "not connected"
         st = describe_status(frame)
         if bt != "connected" and st["state"] != "unknown":
             # The bridge marks the cached status offline while the link is down;
@@ -362,7 +410,7 @@ def status() -> dict:
         "wifi": wifi,
         "gateway": route.get("gateway", ""),
         "route_dev": route.get("dev", ""),
-        "interfaces": interfaces(),
+        "interfaces": label_addresses(interfaces(), plist),
         "printers": plist,
         "saved": saved_wifi(),
         "join": JOBS.snapshot(),
@@ -477,20 +525,171 @@ def active_connection(iface: str) -> str | None:
     return None
 
 
-class DhcpManager:
-    """Keeps one `busybox udhcpc` per printer with `address = dhcp`.
+# ---------------------------------------------------------------------------
+# Next free address (`address = next`)
+# ---------------------------------------------------------------------------
+NEXT_SPAN = 32          # how far past the Pi's own address to look
+DEFEND_EVERY = 120      # seconds between checks that nobody else took a claimed address
+ZERO_IP = b"\0" * 4
 
-    udhcpc requests, renews and (with star-dhcp-alias.sh) adds/removes the
-    address. This class only starts and stops those clients: on the interface
-    that carries the default route, restarting them when the Pi moves to a
-    different network so each printer gets an address on the new one. The
-    bridge notices address changes by itself and restarts.
+
+def arp_frame(src_mac: bytes, src_ip: bytes, target_ip: bytes) -> bytes:
+    """A broadcast ARP request, padded to the 60-byte Ethernet minimum.
+
+    src_ip 0.0.0.0 makes it an RFC 5227 probe ("is anyone using target_ip?");
+    src_ip == target_ip makes it an announcement of an address we now hold.
+    """
+    eth = b"\xff" * 6 + src_mac + b"\x08\x06"
+    arp = struct.pack("!HHBBH6s4s6s4s", 1, 0x0800, 6, 4, 1, src_mac, src_ip, b"\0" * 6, target_ip)
+    return (eth + arp).ljust(60, b"\0")
+
+
+def arp_conflict(frame: bytes, ip: bytes, own_mac: bytes) -> bool:
+    """True if a received ARP frame shows another device using, or probing for, ip."""
+    if len(frame) < 42 or frame[12:14] != b"\x08\x06":
+        return False
+    _, ptype, _, _, op, sha, spa, _, tpa = struct.unpack("!HHBBH6s4s6s4s", frame[14:42])
+    if ptype != 0x0800 or sha == own_mac:
+        return False  # not IPv4, or our own frame echoed back to the socket
+    if spa == ip:
+        return True   # a reply, request or announcement from a device that has ip
+    return op == 1 and spa == ZERO_IP and tpa == ip  # someone else probing for it too
+
+
+def arp_in_use(iface: str, ip: str, probes: int = 3, wait: float = 1.0) -> bool:
+    """Probe the LAN for ip (RFC 5227). True if another device answers.
+
+    Every IPv4 device on the network answers ARP for its own address, even
+    when it ignores ping, so this is a reliable "is it taken right now" check.
+    """
+    own = bytes.fromhex(iface_mac(iface).replace(":", ""))
+    target = socket.inet_aton(ip)
+    s = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(0x0806))
+    try:
+        s.bind((iface, 0))
+        probe = arp_frame(own, ZERO_IP, target)
+        for _ in range(probes):
+            s.send(probe)
+            end = time.monotonic() + wait
+            while True:
+                left = end - time.monotonic()
+                if left <= 0:
+                    break
+                s.settimeout(left)
+                try:
+                    frame = s.recv(256)
+                except socket.timeout:
+                    break
+                if arp_conflict(frame, target, own):
+                    return True
+    finally:
+        s.close()
+    return False
+
+
+def arp_announce(iface: str, ip: str, count: int = 2):
+    """Tell the LAN (the router and the POS included) that ip is now ours."""
+    own = bytes.fromhex(iface_mac(iface).replace(":", ""))
+    a = socket.inet_aton(ip)
+    s = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(0x0806))
+    try:
+        s.bind((iface, 0))
+        for i in range(count):
+            if i:
+                time.sleep(0.5)
+            s.send(arp_frame(own, a, a))
+    finally:
+        s.close()
+
+
+def next_candidates(host: str, prefix: int, taken: set[str], remembered: str | None = None,
+                    span: int = NEXT_SPAN) -> list[str]:
+    """Addresses to try for a `next` printer, best first.
+
+    The address this printer had on this network before (so the POS keeps
+    finding it), then host+1, host+2, ... up to span past the Pi's own address,
+    staying inside the subnet and skipping the broadcast address and anything
+    in taken (the Pi's addresses, the gateway, other printers).
+    """
+    net = ipaddress.ip_interface(f"{host}/{prefix}").network
+    out = []
+    if remembered and remembered not in taken:
+        try:
+            r = ipaddress.ip_address(remembered)
+            if r in net and r not in (net.network_address, net.broadcast_address):
+                out.append(remembered)
+        except ValueError:
+            pass
+    h = int(ipaddress.ip_address(host))
+    for i in range(1, span + 1):
+        if h + i > 0xFFFFFFFF:
+            break
+        a = ipaddress.ip_address(h + i)
+        if a not in net or a == net.broadcast_address:
+            break
+        if str(a) not in taken and str(a) not in out:
+            out.append(str(a))
+    return out
+
+
+def load_claims(path: str = CLAIMS_FILE) -> dict:
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_claims(claims: dict, path: str = CLAIMS_FILE):
+    try:
+        os.makedirs(os.path.dirname(path), mode=0o755, exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(claims, f, indent=1, sort_keys=True)
+        os.replace(tmp, path)
+    except OSError as e:
+        log.warning("next: can't remember claimed addresses in %s: %s", path, e)
+
+
+def write_record(name: str, fields: dict):
+    """Write lease_dir/<name> (key=value lines) atomically; the bridge reads it."""
+    path = os.path.join(slb.LEASE_DIR, name)
+    old = os.umask(0o022)
+    try:
+        with open(path + ".tmp", "w") as f:
+            f.write("".join(f"{k}={v}\n" for k, v in fields.items()))
+        os.replace(path + ".tmp", path)
+    finally:
+        os.umask(old)
+
+
+# ---------------------------------------------------------------------------
+# Printer addresses: one DHCP lease (`dhcp`) or the next free address (`next`)
+# ---------------------------------------------------------------------------
+class AddressManager:
+    """Keeps an address on the LAN for every printer with `address = dhcp` or `next`.
+
+    dhcp: one `busybox udhcpc` per printer, with its own client ID; udhcpc and
+      star-dhcp-alias.sh add, renew and remove the address. If the router
+      ignores the client ID and hands back the Pi's own address, the hook
+      refuses it and the printer falls back to `next` on that network.
+    next: the first address after the Pi's own that no device answers ARP for,
+      remembered per network so the printer keeps the same one; checked every
+      couple of minutes and moved if another device turns up on it.
+
+    Everything runs on the interface with the default route and starts again
+    when the Pi moves to another network. The bridge notices address changes
+    by itself and restarts. Also records the Pi's own address for `auto`.
     """
 
     def __init__(self):
         self.procs: dict[str, subprocess.Popen] = {}
         self.netkey: tuple | None = None
         self.next_start: dict[str, float] = {}
+        self.next_check: dict[str, float] = {}
+        self.fallback: set[str] = set()      # dhcp printers using `next` on this network
+        self.notes: dict[str, str] = {}      # shown on the page, per printer
 
     def run_forever(self):
         os.makedirs(slb.LEASE_DIR, mode=0o755, exist_ok=True)
@@ -498,43 +697,109 @@ class DhcpManager:
             try:
                 self.tick()
             except Exception:
-                log.exception("dhcp: tick failed")
+                log.exception("address: tick failed")
             time.sleep(5)
 
-    def wanted(self) -> list[str]:
+    def wanted(self) -> dict[str, str]:
+        """{printer: "dhcp" | "next"} in config order."""
         try:
-            return [p["name"] for p in slb.read_printer_config(BRIDGE_CONF) if p["address"].lower() == "dhcp"]
+            return {p["name"]: p["address"].lower() for p in slb.read_printer_config(BRIDGE_CONF)
+                    if p["address"].lower() in ("dhcp", "next")}
         except (OSError, ValueError):
-            return []
+            return {}
 
+    # -- network ------------------------------------------------------------
     def tick(self):
         iface = slb.default_route_iface()
         conn = active_connection(iface) if iface else None
         key = (iface, conn) if iface and conn else None
         if key != self.netkey:
             if self.netkey is not None:
-                log.info("dhcp: network changed %s -> %s; renewing printer addresses", self.netkey, key)
+                log.info("address: network changed %s -> %s; renewing printer addresses", self.netkey, key)
                 self.stop_all(drop_addresses=True)
             elif key is not None:
                 self.drop_stale(iface)  # leases from another interface after a restart
             self.netkey = key
+            self.fallback.clear()
+            self.notes.clear()
+            self.next_check.clear()
         if key is None:
+            self.write_host(None, None)
             return
-        names = self.wanted()
+        modes = self.wanted()
         for name in list(self.procs):
-            if name not in names:
-                self.stop(name, drop_address=True)
-        for name in names:
-            proc = self.procs.get(name)
-            if proc and proc.poll() is None:
-                continue
-            if proc:
-                log.warning("dhcp: client for %s exited (%s); restarting", name, proc.returncode)
-                self.procs.pop(name)
-                self.next_start[name] = time.time() + 10
-            if time.time() >= self.next_start.get(name, 0):
-                self.start(name, iface)
-        self.ensure_addresses(iface, names)
+            if modes.get(name) != "dhcp" or name in self.fallback:
+                self.stop(name, drop_address=name not in self.fallback)
+        for name in [n for n in os.listdir(slb.LEASE_DIR) if n.startswith("lease-")]:
+            if name[6:] not in modes:
+                self.drop_lease(name[6:])
+        self.write_host(iface, self.host_ip(iface))
+        for name, mode in modes.items():
+            if mode == "dhcp" and name not in self.fallback:
+                if self.take_clash(name):
+                    continue
+                self.keep_dhcp(name, iface)
+            else:
+                self.keep_next(name, iface, conn)
+        self.ensure_addresses(iface, list(modes))
+
+    def own_addresses(self, iface: str) -> list[dict]:
+        return [a for i in interfaces() if i["name"] == iface for a in i["addresses"]]
+
+    def printer_ips(self) -> set[str]:
+        out = set()
+        for f in os.listdir(slb.LEASE_DIR) if os.path.isdir(slb.LEASE_DIR) else []:
+            if f.startswith("lease-"):
+                ip_ = read_lease_file(f[6:]).get("ip")
+                if ip_:
+                    out.add(ip_)
+        return out
+
+    def host_ip(self, iface: str) -> tuple[str, int] | None:
+        """The Pi's own address on iface: not one of the printers', DHCP first."""
+        mine = self.printer_ips()
+        addrs = [a for a in self.own_addresses(iface) if a["ip"] not in mine]
+        addrs.sort(key=lambda a: (not a["dhcp"], a["secondary"]))
+        return (addrs[0]["ip"], addrs[0]["prefix"]) if addrs else None
+
+    def write_host(self, iface: str | None, host: tuple[str, int] | None):
+        path = os.path.join(slb.LEASE_DIR, "host")
+        if not iface or not host:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+            return
+        want = {"ip": host[0], "prefix": host[1], "interface": iface}
+        if read_lease_file_at(path) != {k: str(v) for k, v in want.items()}:
+            write_record("host", want)
+
+    # -- dhcp -----------------------------------------------------------------
+    def take_clash(self, name: str) -> bool:
+        """True (and switch to `next`) if the hook refused this printer's lease."""
+        path = os.path.join(slb.LEASE_DIR, f"clash-{name}")
+        if not os.path.exists(path):
+            return False
+        ip_ = read_lease_file_at(path).get("ip", "?")
+        os.unlink(path)
+        log.warning("dhcp: the router gave %s the address %s, which the Pi already uses: it ignores "
+                    "DHCP client IDs. Using the next available address for %s on this network.", name, ip_, name)
+        self.stop(name, drop_address=True)
+        self.fallback.add(name)
+        self.notes[name] = ("This router gives every printer the Pi's own address, so this printer "
+                            "uses the next available address instead (address = next).")
+        return True
+
+    def keep_dhcp(self, name: str, iface: str):
+        proc = self.procs.get(name)
+        if proc and proc.poll() is None:
+            return
+        if proc:
+            log.warning("dhcp: client for %s exited (%s); restarting", name, proc.returncode)
+            self.procs.pop(name)
+            self.next_start[name] = time.time() + 10
+        if time.time() >= self.next_start.get(name, 0):
+            self.start(name, iface)
 
     def start(self, name: str, iface: str):
         args = ["busybox", "udhcpc", "-i", iface, "-f", "-C",
@@ -542,13 +807,77 @@ class DhcpManager:
                 "-x", f"hostname:{dhcp_hostname(name)}",
                 "-s", ALIAS_SCRIPT, "-t", "5", "-T", "3", "-A", "20"]
         prev = read_lease_file(name)
-        if prev.get("ip") and prev.get("interface") == iface:
+        if prev.get("ip") and prev.get("interface") == iface and prev.get("mode", "dhcp") == "dhcp":
             args += ["-r", prev["ip"]]  # ask for the address we had
         env = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "PRINTER": name, "LEASE_DIR": slb.LEASE_DIR}
         self.procs[name] = subprocess.Popen(args, env=env, stdin=subprocess.DEVNULL,
                                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         log.info("dhcp: requesting an address for %s on %s", name, iface)
 
+    # -- next -----------------------------------------------------------------
+    def keep_next(self, name: str, iface: str, conn: str):
+        lease = read_lease_file(name)
+        have = {a["ip"] for a in self.own_addresses(iface)}
+        if lease.get("mode") == "next" and lease.get("interface") == iface and lease.get("ip"):
+            if time.time() < self.next_check.get(name, 0):
+                return
+            self.next_check[name] = time.time() + DEFEND_EVERY
+            if not arp_in_use(iface, lease["ip"], probes=2):
+                return
+            log.warning("next: another device is now using %s; moving %s to another address", lease["ip"], name)
+            self.drop_lease(name)
+            self.forget_claim(conn, name)
+            have.discard(lease["ip"])
+        elif lease.get("ip"):
+            self.drop_lease(name)  # a DHCP lease or another interface's address
+        if time.time() < self.next_start.get(name, 0):
+            return
+        host = self.host_ip(iface)
+        if not host:
+            return
+        taken = have | self.printer_ips() | {host[0]}
+        gw = default_route().get("gateway")
+        if gw:
+            taken.add(gw)
+        remembered = load_claims().get(conn, {}).get(name)
+        for cand in next_candidates(host[0], host[1], taken, remembered):
+            if arp_in_use(iface, cand):
+                log.info("next: %s is in use; trying the next address for %s", cand, name)
+                continue
+            self.claim(name, iface, conn, cand, host[1])
+            return
+        log.warning("next: no free address within %d of %s for %s; trying again in a minute",
+                    NEXT_SPAN, host[0], name)
+        self.notes[name] = f"No free address found after {host[0]}; trying again."
+        self.next_start[name] = time.time() + 60
+
+    def claim(self, name: str, iface: str, conn: str, ip_: str, prefix: int):
+        r = run(["ip", "addr", "replace", f"{ip_}/{prefix}", "dev", iface, "noprefixroute"])
+        if r.returncode != 0:
+            log.warning("next: couldn't add %s for %s: %s", ip_, name, r.stderr.strip())
+            self.next_start[name] = time.time() + 60
+            return
+        try:
+            arp_announce(iface, ip_)
+        except OSError as e:
+            log.warning("next: couldn't announce %s: %s", ip_, e)
+        write_record(f"lease-{name}", {"ip": ip_, "mask": prefix, "interface": iface,
+                                       "mode": "next", "obtained": int(time.time())})
+        claims = load_claims()
+        if claims.get(conn, {}).get(name) != ip_:
+            claims.setdefault(conn, {})[name] = ip_
+            save_claims(claims)
+        self.next_check[name] = time.time() + DEFEND_EVERY
+        if name not in self.fallback:
+            self.notes.pop(name, None)
+        log.info("next: %s is using %s/%d on %s", name, ip_, prefix, iface)
+
+    def forget_claim(self, conn: str, name: str):
+        claims = load_claims()
+        if claims.get(conn, {}).pop(name, None):
+            save_claims(claims)
+
+    # -- shared ---------------------------------------------------------------
     def stop(self, name: str, drop_address: bool):
         proc = self.procs.pop(name, None)
         if proc and proc.poll() is None:
@@ -583,12 +912,16 @@ class DhcpManager:
                 self.drop_lease(f[6:])
 
     def ensure_addresses(self, iface: str, names: list[str]):
-        """Put a leased address back if something (e.g. NetworkManager) removed it."""
-        have = {a["ip"] for i in interfaces() if i["name"] == iface for a in i["addresses"]}
+        """Put a printer address back if something (e.g. NetworkManager) removed it."""
+        have = {a["ip"] for a in self.own_addresses(iface)}
         for name in names:
             lease = read_lease_file(name)
             ip_ = lease.get("ip")
             if not ip_ or ip_ in have or lease.get("interface") != iface:
+                continue
+            if lease.get("mode") == "next":
+                log.warning("next: %s lost its address %s; re-adding", name, ip_)
+                run(["ip", "addr", "replace", f"{ip_}/{lease.get('mask', '24')}", "dev", iface, "noprefixroute"])
                 continue
             try:
                 left = int(lease["obtained"]) + int(lease["lease"]) - int(time.time())
@@ -600,7 +933,7 @@ class DhcpManager:
                      "valid_lft", str(left), "preferred_lft", str(left), "noprefixroute"])
 
 
-DHCP = DhcpManager()
+ADDR = AddressManager()
 
 
 # ---------------------------------------------------------------------------
@@ -867,6 +1200,7 @@ CSS = """
 padding:16px max(16px,env(safe-area-inset-left)) 48px}main{max-width:760px;margin:0 auto;display:grid;gap:16px}
 h1{font-size:1.35rem;margin:8px 0 0}h2{font-size:1rem;margin:0 0 10px}.sub{color:var(--muted);margin:0}
 .card{background:var(--card);border:1px solid var(--rule);border-radius:10px;padding:16px}
+.addr+.addr{margin-top:2px}.addr small,.addr .who{color:var(--muted)}.addr .who{margin-left:.75em}
 .kv{display:grid;grid-template-columns:max-content 1fr;gap:4px 16px}.kv dt{color:var(--muted)}.kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
 .mono{font-family:var(--mono);font-size:.9em}.ip{font-family:var(--mono);font-size:1.05rem;font-weight:600}
 .pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:.8rem;font-weight:600}
@@ -1033,7 +1367,7 @@ function render(s) {
   let rows = `<dt>Wi-Fi</dt><dd>${wifi}</dd><dt>Gateway</dt><dd class="mono">${esc(s.gateway)||"none"}</dd>`;
   for (const i of s.interfaces) {
     if (!i.addresses.length) continue;
-    const a = i.addresses.map(x => `<span class="mono">${esc(x.ip)}</span><small> /${x.prefix}${x.dhcp?" · DHCP":" · fixed"}</small>`).join("<br>");
+    const a = i.addresses.map(x => `<div class="addr"><span class="mono">${esc(x.ip)}/${x.prefix}</span>${x.owner ? ` <span class="who">${esc(x.owner)}</span>` : ""} <small>(${esc(x.kind || (x.dhcp ? "DHCP" : "fixed"))})</small></div>`).join("");
     rows += `<dt>${esc(i.name)}</dt><dd>${a}</dd>`;
   }
   $("net").innerHTML = rows;
@@ -1045,7 +1379,8 @@ function render(s) {
       <dl class="kv" style="margin-top:8px"><dt>Address</dt><dd class="mono">${esc(p.address) || "waiting for an address…"}</dd>
       <dt>Device</dt><dd class="mono">${esc(p.device)}</dd>
       <dt>CUPS</dt><dd class="mono">socket://${esc(p.local||"127.0.0.1")}:9100</dd>
-      <dt>Status</dt><dd><span class="pill ${esc(st.state)}" title="${esc(st.raw)}">${esc(st.text)}</span></dd></dl></div>`;
+      <dt>Status</dt><dd><span class="pill ${esc(st.state)}" title="${esc(st.raw)}">${esc(st.text)}</span></dd></dl>
+      ${p.note ? `<p class="sub" style="margin-top:8px">${esc(p.note)}</p>` : ""}</div>`;
   }).join("");
   $("saved").innerHTML = s.saved.length ? s.saved.map(n => `<tr><td><strong>${esc(n.name)}</strong>
       ${n.active?'<span class="pill ok">in use</span>':""}</td>
@@ -1134,7 +1469,7 @@ def main():
     if a.set_password:
         raise SystemExit(set_password_interactive())
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    threading.Thread(target=DHCP.run_forever, daemon=True, name="dhcp").start()
+    threading.Thread(target=ADDR.run_forever, daemon=True, name="addresses").start()
     srv = http.server.ThreadingHTTPServer((a.listen, a.port), Handler)
     srv.daemon_threads = True
     log.info("star-admin on http://%s:%d (%s)", a.listen, a.port,
