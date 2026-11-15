@@ -25,6 +25,9 @@ Second printers on routers that ignore DHCP client IDs.
   bridge treats any device that isn't an RFCOMM TTY as always connected, and
   the admin page shows such a printer as connected while the bridge answers
   for it.
+* **Admin page:** each address on an interface says whose it is, "this
+  device" or the printer's name, with its source in brackets: DHCP, next
+  available or fixed.
 
 ## 0.4.0 (2026-11-14)
 

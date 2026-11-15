@@ -358,6 +358,33 @@ def printers() -> list[dict]:
     return out
 
 
+def label_addresses(ifaces: list[dict], plist: list[dict]) -> list[dict]:
+    """Say whose each address is: the Pi's own ("this device") or a printer's (its name).
+
+    Also names the kind: "DHCP", "next available" (claimed by star-admin for a
+    printer with address = next) or "fixed".
+    """
+    host = read_lease_file_at(os.path.join(slb.LEASE_DIR, "host"))
+    by_ip = {}
+    for p in plist:
+        if p.get("address"):
+            by_ip.setdefault(p["address"], []).append(p)
+    out = []
+    for i in ifaces:
+        addrs = []
+        for a in i["addresses"]:
+            owners = by_ip.get(a["ip"], [])
+            names = [p["name"] for p in owners]
+            is_host = host.get("ip") == a["ip"] and host.get("interface") == i["name"]
+            if is_host:
+                names.insert(0, "this device")
+            kind = "next available" if any(p.get("mode") == "next" for p in owners) and not a["dhcp"] \
+                else ("DHCP" if a["dhcp"] else "fixed")
+            addrs.append({**a, "owner": ", ".join(names), "kind": kind})
+        out.append({**i, "addresses": addrs})
+    return out
+
+
 def status() -> dict:
     route = default_route()
     links = rfcomm_states()
@@ -383,7 +410,7 @@ def status() -> dict:
         "wifi": wifi,
         "gateway": route.get("gateway", ""),
         "route_dev": route.get("dev", ""),
-        "interfaces": interfaces(),
+        "interfaces": label_addresses(interfaces(), plist),
         "printers": plist,
         "saved": saved_wifi(),
         "join": JOBS.snapshot(),
@@ -756,11 +783,11 @@ class AddressManager:
         ip_ = read_lease_file_at(path).get("ip", "?")
         os.unlink(path)
         log.warning("dhcp: the router gave %s the address %s, which the Pi already uses: it ignores "
-                    "DHCP client IDs. Using the next free address for %s on this network.", name, ip_, name)
+                    "DHCP client IDs. Using the next available address for %s on this network.", name, ip_, name)
         self.stop(name, drop_address=True)
         self.fallback.add(name)
         self.notes[name] = ("This router gives every printer the Pi's own address, so this printer "
-                            "uses the next free address instead (address = next).")
+                            "uses the next available address instead (address = next).")
         return True
 
     def keep_dhcp(self, name: str, iface: str):
@@ -1173,6 +1200,7 @@ CSS = """
 padding:16px max(16px,env(safe-area-inset-left)) 48px}main{max-width:760px;margin:0 auto;display:grid;gap:16px}
 h1{font-size:1.35rem;margin:8px 0 0}h2{font-size:1rem;margin:0 0 10px}.sub{color:var(--muted);margin:0}
 .card{background:var(--card);border:1px solid var(--rule);border-radius:10px;padding:16px}
+.addr+.addr{margin-top:2px}.addr small,.addr .who{color:var(--muted)}.addr .who{margin-left:.75em}
 .kv{display:grid;grid-template-columns:max-content 1fr;gap:4px 16px}.kv dt{color:var(--muted)}.kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
 .mono{font-family:var(--mono);font-size:.9em}.ip{font-family:var(--mono);font-size:1.05rem;font-weight:600}
 .pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:.8rem;font-weight:600}
@@ -1339,7 +1367,7 @@ function render(s) {
   let rows = `<dt>Wi-Fi</dt><dd>${wifi}</dd><dt>Gateway</dt><dd class="mono">${esc(s.gateway)||"none"}</dd>`;
   for (const i of s.interfaces) {
     if (!i.addresses.length) continue;
-    const a = i.addresses.map(x => `<span class="mono">${esc(x.ip)}</span><small> /${x.prefix}${x.dhcp?" · DHCP":" · fixed"}</small>`).join("<br>");
+    const a = i.addresses.map(x => `<div class="addr"><span class="mono">${esc(x.ip)}/${x.prefix}</span>${x.owner ? ` <span class="who">${esc(x.owner)}</span>` : ""} <small>(${esc(x.kind || (x.dhcp ? "DHCP" : "fixed"))})</small></div>`).join("");
     rows += `<dt>${esc(i.name)}</dt><dd>${a}</dd>`;
   }
   $("net").innerHTML = rows;

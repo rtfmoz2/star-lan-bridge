@@ -344,7 +344,7 @@ class AddressManagerTest(unittest.TestCase):
         with self.assertLogs(admin.log, "WARNING"):
             self.assertTrue(self.m.take_clash("TSP143-2"))
         self.assertIn("TSP143-2", self.m.fallback)
-        self.assertIn("next free address", self.m.notes["TSP143-2"])
+        self.assertIn("next available address", self.m.notes["TSP143-2"])
         self.assertFalse(self.m.take_clash("TSP143-2"))
 
 
@@ -395,6 +395,26 @@ class LinkStateTest(unittest.TestCase):
         self.assertEqual((p["bluetooth"], p["status"]["state"]), ("connected", "ok"))
         admin.read_status_frame = lambda host, timeout=1.5: None
         self.assertEqual(admin.status()["printers"][0]["bluetooth"], "not connected")
+
+
+class AddressLabelTest(unittest.TestCase):
+    def test_owner_and_kind(self):
+        import tempfile
+        d = tempfile.mkdtemp()
+        saved = admin.slb.LEASE_DIR
+        admin.slb.LEASE_DIR = d
+        self.addCleanup(setattr, admin.slb, "LEASE_DIR", saved)
+        with open(os.path.join(d, "host"), "w") as f:
+            f.write("ip=10.0.0.4\nprefix=24\ninterface=wlan0\n")
+        ifaces = [{"name": "wlan0", "state": "UP", "addresses": [
+            {"ip": "10.0.0.4", "prefix": 24, "dhcp": True, "secondary": False},
+            {"ip": "10.0.0.6", "prefix": 24, "dhcp": False, "secondary": True},
+            {"ip": "10.0.0.9", "prefix": 24, "dhcp": False, "secondary": True}]}]
+        plist = [{"name": "P1", "address": "10.0.0.6", "mode": "next"},
+                 {"name": "P0", "address": "10.0.0.4", "mode": "auto"}]
+        a = admin.label_addresses(ifaces, plist)[0]["addresses"]
+        self.assertEqual([(x["owner"], x["kind"]) for x in a],
+                         [("this device, P0", "DHCP"), ("P1", "next available"), ("", "fixed")])
 
 
 class SshctlPageTest(unittest.TestCase):
