@@ -363,18 +363,49 @@ def default_route_iface() -> str | None:
     return best[0] if best else None
 
 
-def read_lease(name: str, lease_dir: str = LEASE_DIR) -> str | None:
-    """IPv4 address from a printer's DHCP lease file (written by star-admin), or None."""
+def read_lease_record(name: str, lease_dir: str = LEASE_DIR) -> dict:
+    """key=value pairs from a record star-admin keeps in lease_dir, or {}."""
+    out = {}
     try:
-        with open(os.path.join(lease_dir, f"lease-{name}")) as f:
+        with open(os.path.join(lease_dir, name)) as f:
             for line in f:
                 key, _, value = line.strip().partition("=")
-                if key == "ip":
-                    socket.inet_aton(value)
-                    return value
-    except (OSError, ValueError):
+                out[key] = value
+    except OSError:
         pass
-    return None
+    return out
+
+
+def read_lease(name: str, lease_dir: str = LEASE_DIR) -> str | None:
+    """IPv4 address star-admin keeps for a printer (`dhcp` or `next`), or None."""
+    value = read_lease_record(f"lease-{name}", lease_dir).get("ip", "")
+    try:
+        socket.inet_aton(value)
+    except OSError:
+        return None
+    return value if value.count(".") == 3 else None
+
+
+def host_address(lease_dir: str = LEASE_DIR) -> str | None:
+    """The Pi's own DHCP address on the default-route interface.
+
+    star-admin records it in lease_dir/host, leaving out the addresses it added
+    for printers. Without that record (star-admin not installed) this is the
+    interface's primary address, which is the Pi's own unless a printer address
+    was promoted after the Pi's lease went away.
+    """
+    dev = default_route_iface()
+    if not dev:
+        return None
+    rec = read_lease_record("host", lease_dir)
+    if rec.get("interface") == dev and rec.get("ip", "").count(".") == 3:
+        try:
+            socket.inet_aton(rec["ip"])
+            return rec["ip"]
+        except OSError:
+            pass
+    info = iface_info(dev)
+    return socket.inet_ntoa(info[0]) if info else None
 
 
 def resolve_address(name: str, value: str, lease_dir: str = LEASE_DIR) -> str | None:
@@ -382,15 +413,14 @@ def resolve_address(name: str, value: str, lease_dir: str = LEASE_DIR) -> str | 
 
       auto   the host's own DHCP address on the default-route interface
       dhcp   this printer's own DHCP lease, kept by star-admin
+      next   the next free address after the host's, claimed by star-admin
       a.b.c.d  used as given
     Returns None if the address isn't known yet (no network, no lease).
     """
     v = value.strip().lower()
     if v == "auto":
-        dev = default_route_iface()
-        info = iface_info(dev) if dev else None
-        return socket.inet_ntoa(info[0]) if info else None
-    if v == "dhcp":
+        return host_address(lease_dir)
+    if v in ("dhcp", "next"):
         return read_lease(name, lease_dir)
     socket.inet_aton(value)  # raises on a malformed address
     return value
@@ -421,24 +451,42 @@ def read_printer_config(path: str) -> list[dict]:
     return out
 
 
-def load_config(path: str, lease_dir: str = LEASE_DIR) -> list[Station]:
-    """Build one Station per printer whose address is known right now.
+def plan_addresses(path: str, lease_dir: str = LEASE_DIR, quiet: bool = False) -> list[tuple[dict, str]]:
+    """(printer, address) for every printer that can be served right now.
 
-    A printer whose address can't be resolved yet (`dhcp` before its first
-    lease, `auto` with no network) is skipped with a warning; star-admin
-    restarts the bridge when the address appears.
+    A printer whose address isn't known yet (`dhcp` or `next` before star-admin
+    has one, `auto` with no network) is left out, and so is a printer whose
+    address or `local` address is already taken by an earlier printer: one
+    clash mustn't stop the other printers. Both are logged unless quiet.
     """
-    stations, seen = [], set()
+    out, seen = [], {}
     for p in read_printer_config(path):
         address = resolve_address(p["name"], p["address"], lease_dir)
         if address is None:
-            log.warning("[%s] no address yet (address = %s); not serving this printer until it has one",
-                        p["name"], p["address"])
+            if not quiet:
+                log.warning("[%s] no address yet (address = %s); not serving this printer until it has one",
+                            p["name"], p["address"])
             continue
-        for a in [address] + ([p["local"]] if p["local"] else []):
-            if a in seen:
-                raise ValueError(f"[printer:{p['name']}] address {a} is used by another printer")
-            seen.add(a)
+        mine = [address] + ([p["local"]] if p["local"] else [])
+        clash = next((a for a in mine if a in seen), None)
+        if clash:
+            if not quiet:
+                log.error("[%s] address %s is already used by printer %s; not serving %s until that changes",
+                          p["name"], clash, seen[clash], p["name"])
+            continue
+        seen.update({a: p["name"] for a in mine})
+        out.append((p, address))
+    return out
+
+
+def load_config(path: str, lease_dir: str = LEASE_DIR) -> list[Station]:
+    """Build one Station per printer that can be served right now (see plan_addresses).
+
+    star-admin's address changes make the bridge restart (watch_addresses), so
+    a printer that was left out is picked up once its address is sorted out.
+    """
+    stations = []
+    for p, address in plan_addresses(path, lease_dir):
         mac = parse_mac(p["mac"]) if p["mac"] else None
         stations.append(Station(p["name"], p["device"], address, p["local"], mac))
     return stations
@@ -724,8 +772,15 @@ class Printer:
         return self.pending is not None
 
     def link_state(self) -> str:
-        """Kernel RFCOMM state for this device: connected, config (connecting), closed, clean..."""
-        num = self.path.rsplit("rfcomm", 1)[-1]
+        """Kernel RFCOMM state for this device: connected, config (connecting), closed, clean...
+
+        A device that isn't an RFCOMM TTY (a USB serial port, or the pty of
+        tools/mock_printer.py) has no Bluetooth link to wait for: "connected".
+        """
+        real = os.path.basename(os.path.realpath(self.path))
+        if not real.startswith("rfcomm"):
+            return "connected"
+        num = real[len("rfcomm"):]
         try:
             out = subprocess.run(["rfcomm", "show", num], capture_output=True, text=True, timeout=3).stdout
         except (OSError, subprocess.TimeoutExpired):
@@ -1067,29 +1122,29 @@ def run_station(station: Station):
         os._exit(1)
 
 
-def current_addresses(path: str) -> dict:
-    """{printer name: resolved address or None} for every printer in the config."""
+def current_addresses(path: str) -> dict | None:
+    """{printer name: address} for the printers load_config would serve now, or None."""
     try:
-        return {p["name"]: resolve_address(p["name"], p["address"]) for p in read_printer_config(path)}
+        return {p["name"]: a for p, a in plan_addresses(path, quiet=True)}
     except (OSError, ValueError):
-        return {}
+        return None
 
 
 def watch_addresses(path: str, stations: list, interval: float = 10.0):
     """Exit (for systemd to restart us) when a printer's resolved address changes.
 
-    Addresses come from DHCP (`auto`, `dhcp`), so they can change: a new lease,
-    a renewal with a different address, or joining another Wi-Fi network. The
-    listeners are bound to specific addresses, so the simplest correct response
-    is a clean restart, which takes a few seconds.
+    Addresses come from DHCP or star-admin (`auto`, `dhcp`, `next`), so they
+    can change: a new lease, a renewal with a different address, a printer
+    address that had to move, or joining another Wi-Fi network. The listeners
+    are bound to specific addresses, so the simplest correct response is a
+    clean restart, which takes a few seconds.
     """
     serving = {s.name: s.address for s in stations}
     while True:
         time.sleep(interval)
-        now = current_addresses(path)
-        if not now:
-            continue
-        wanted = {k: v for k, v in now.items() if v}
+        wanted = current_addresses(path)
+        if wanted is None:
+            continue  # config unreadable for a moment; keep serving
         if wanted != serving:
             log.info("addresses changed %s -> %s; restarting", serving, wanted)
             os._exit(0)

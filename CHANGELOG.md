@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.5.0 (unreleased)
+
+Second printers on routers that ignore DHCP client IDs.
+
+* **`address = next`:** a printer takes the first free address after the
+  Pi's own (Pi on .10: .11 if nothing answers on it, else .12, ...). star-admin
+  checks with ARP probes, remembers the address per Wi-Fi network so the
+  printer gets it back after a reboot, re-checks it every two minutes and moves
+  it if another device turns up. Works with any router and needs no fixed
+  address. The example config now uses it for printer 2.
+* **`address = dhcp` falls back to `next`** when the router hands back the
+  Pi's own address (it leases by MAC and ignores the client ID). The DHCP hook
+  refuses such a lease, and the admin page says why under the printer.
+* **One clash no longer stops every printer.** A printer whose address is
+  already taken by another is skipped with an error in the log, and the rest
+  are served. Before, the bridge exited and systemd restarted it in a loop,
+  so no printer worked.
+* **`address = auto` uses the Pi's own DHCP address**, as recorded by
+  star-admin, not simply the interface's first address. Adding a static or
+  printer address to the interface can no longer move printer 1.
+* **`tools/mock_printer.py`:** a stand-in for a Bluetooth TSP100III on a
+  pseudo-terminal, for testing a Pi with no printers (docs/TESTING.md). The
+  bridge treats any device that isn't an RFCOMM TTY as always connected, and
+  the admin page shows such a printer as connected while the bridge answers
+  for it.
+
 ## 0.4.0 (2026-11-14)
 
 Hardening for commercial deployment.

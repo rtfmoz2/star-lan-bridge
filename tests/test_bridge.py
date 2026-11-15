@@ -107,8 +107,8 @@ class AsbFrameTest(unittest.TestCase):
 
 
 class DiscoveryTest(unittest.TestCase):
-    INFO = (socket.inet_aton("192.168.1.134"), socket.inet_aton("255.255.255.0"),
-            bytes.fromhex("dca632aabbcc"), socket.inet_aton("192.168.1.1"))
+    INFO = (socket.inet_aton("192.168.50.134"), socket.inet_aton("255.255.255.0"),
+            bytes.fromhex("dca632aabbcc"), socket.inet_aton("192.168.50.1"))
 
     def test_template_shape(self):
         t = bridge.DISCOVERY_TEMPLATE
@@ -120,9 +120,9 @@ class DiscoveryTest(unittest.TestCase):
     def test_reply_patches_only_network_fields(self):
         reply = bridge.build_discovery_reply(self.INFO)
         info = probe.decode_discovery(reply)
-        self.assertEqual(info["ip"], "192.168.1.134")
+        self.assertEqual(info["ip"], "192.168.50.134")
         self.assertEqual(info["netmask"], "255.255.255.0")
-        self.assertEqual(info["gateway"], "192.168.1.1")
+        self.assertEqual(info["gateway"], "192.168.50.1")
         self.assertEqual(info["mac"], "dc:a6:32:aa:bb:cc")
         self.assertEqual(info["model"], "TSP143IIILAN (STR_T-001)")
         self.assertEqual(info["manufacturer"], "Star")
@@ -160,18 +160,18 @@ class ConfigTest(unittest.TestCase):
     def test_example_config_parses(self):
         plist = bridge.read_printer_config(os.path.join(ROOT, "examples", "star-lan-bridge.conf"))
         self.assertEqual([p["name"] for p in plist], ["TSP143", "TSP143-2"])
-        self.assertEqual([p["address"] for p in plist], ["auto", "dhcp"])
+        self.assertEqual([p["address"] for p in plist], ["auto", "next"])
         self.assertEqual(plist[1]["device"], "/dev/rfcomm1")
         self.assertEqual(plist[1]["local"], "127.0.0.2")
 
     def test_dhcp_printer_uses_its_lease(self):
         path = self.write("[printer:a]\ndevice=/dev/rfcomm0\naddress=10.0.0.5\nlocal=127.0.0.1\n"
-                          "[printer:b]\ndevice=/dev/rfcomm1\naddress=dhcp\nlocal=127.0.0.2\nmac=00:11:62:2e:75:05\n")
+                          "[printer:b]\ndevice=/dev/rfcomm1\naddress=dhcp\nlocal=127.0.0.2\nmac=00:11:62:00:00:02\n")
         stations = bridge.load_config(path, lease_dir=self.lease_dir({"b": "10.0.0.37"}))
         a, b = stations
         self.assertEqual(a.listen_addrs(), ["10.0.0.5", "127.0.0.1"])
         self.assertEqual(b.listen_addrs(), ["10.0.0.37", "127.0.0.2"])
-        self.assertEqual(b.mac, bytes.fromhex("0011622e7505"))
+        self.assertEqual(b.mac, bytes.fromhex("001162000002"))
 
     def test_printer_without_lease_is_skipped(self):
         path = self.write("[printer:a]\ndevice=/dev/rfcomm0\naddress=10.0.0.5\n"
@@ -193,11 +193,54 @@ class ConfigTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             bridge.read_printer_config(self.write("[printer:../etc]\ndevice=/dev/rfcomm0\naddress=dhcp\n"))
 
-    def test_duplicate_address_rejected(self):
+    def test_duplicate_address_skips_only_that_printer(self):
         path = self.write("[printer:a]\ndevice=/dev/rfcomm0\naddress=10.0.0.5\n"
-                          "[printer:b]\ndevice=/dev/rfcomm1\naddress=10.0.0.5\n")
-        with self.assertRaises(ValueError):
-            bridge.load_config(path)
+                          "[printer:b]\ndevice=/dev/rfcomm1\naddress=10.0.0.5\n"
+                          "[printer:c]\ndevice=/dev/rfcomm2\naddress=10.0.0.7\n")
+        with self.assertLogs(bridge.log, "ERROR"):
+            stations = bridge.load_config(path)
+        self.assertEqual([s.name for s in stations], ["a", "c"])
+
+    def test_lease_equal_to_host_address_does_not_stop_the_bridge(self):
+        # The on-site failure: the router gave printer 2 the Pi's own address.
+        d = self.lease_dir({"b": "192.168.50.10"})
+        with open(os.path.join(d, "host"), "w") as f:
+            f.write("ip=192.168.50.10\nprefix=24\ninterface=wlan0\n")
+        path = self.write("[printer:a]\ndevice=/dev/rfcomm0\naddress=auto\n"
+                          "[printer:b]\ndevice=/dev/rfcomm1\naddress=dhcp\n")
+        orig = bridge.default_route_iface
+        bridge.default_route_iface = lambda: "wlan0"
+        self.addCleanup(setattr, bridge, "default_route_iface", orig)
+        with self.assertLogs(bridge.log, "ERROR"):
+            stations = bridge.load_config(path, lease_dir=d)
+        self.assertEqual([(s.name, s.address) for s in stations], [("a", "192.168.50.10")])
+        # The address watcher sees the same plan, so it doesn't restart in a loop.
+        plan = {p["name"]: a for p, a in bridge.plan_addresses(path, d, quiet=True)}
+        self.assertEqual(plan, {s.name: s.address for s in stations})
+
+    def test_next_printer_uses_its_record(self):
+        path = self.write("[printer:a]\ndevice=/dev/rfcomm0\naddress=10.0.0.5\n"
+                          "[printer:b]\ndevice=/dev/rfcomm1\naddress=next\n")
+        stations = bridge.load_config(path, lease_dir=self.lease_dir({"b": "10.0.0.6"}))
+        self.assertEqual([s.address for s in stations], ["10.0.0.5", "10.0.0.6"])
+        self.assertEqual([s.name for s in bridge.load_config(path, lease_dir=self.lease_dir({}))], ["a"])
+
+    def test_auto_prefers_host_record_on_the_default_interface(self):
+        d = self.lease_dir({})
+        with open(os.path.join(d, "host"), "w") as f:
+            f.write("ip=192.168.50.10\nprefix=24\ninterface=wlan0\n")
+        orig_dev, orig_info = bridge.default_route_iface, bridge.iface_info
+        self.addCleanup(setattr, bridge, "default_route_iface", orig_dev)
+        self.addCleanup(setattr, bridge, "iface_info", orig_info)
+        # The interface's primary address is a printer's, e.g. after the Pi's lease was renumbered.
+        bridge.iface_info = lambda dev: (bytes([192, 168, 50, 250]), b"\xff\xff\xff\0", b"\0" * 6, b"\0" * 4)
+        bridge.default_route_iface = lambda: "wlan0"
+        self.assertEqual(bridge.resolve_address("a", "auto", d), "192.168.50.10")
+        bridge.default_route_iface = lambda: "eth0"   # record is for another interface: use the primary
+        self.assertEqual(bridge.resolve_address("a", "auto", d), "192.168.50.250")
+
+    def test_non_rfcomm_device_counts_as_connected(self):
+        self.assertEqual(bridge.Printer("/dev/ttyUSB0").link_state(), "connected")
 
     def test_missing_fields_rejected(self):
         with self.assertRaises(ValueError):
@@ -214,7 +257,7 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(st.listen_addrs(), ["0.0.0.0"])
 
     def test_parse_mac(self):
-        self.assertEqual(bridge.parse_mac("00-11-62-2E-75-05"), bytes.fromhex("0011622e7505"))
+        self.assertEqual(bridge.parse_mac("00-11-62-00-00-02"), bytes.fromhex("001162000002"))
         with self.assertRaises(ValueError):
             bridge.parse_mac("00:11:62")
 

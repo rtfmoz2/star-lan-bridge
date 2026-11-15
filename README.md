@@ -18,13 +18,17 @@ frames back. POS apps then confirm each job and don't reprint. It's a single
 Python file with no dependencies beyond the standard library.
 
 **Several printers.** One Pi can serve more than one Bluetooth printer. Each
-gets its own IP address from DHCP, its own `/dev/rfcommN` and its own CUPS
-queue, and appears to POS apps as a separate Star LAN printer:
+gets its own IP address, its own `/dev/rfcommN` and its own CUPS queue, and
+appears to POS apps as a separate Star LAN printer. No address is fixed:
 
 ```
-Pi's DHCP address    ──▶ /dev/rfcomm0 ──▶ printer 1   (address = auto, CUPS 127.0.0.1:9100)
-printer's own lease  ──▶ /dev/rfcomm1 ──▶ printer 2   (address = dhcp, CUPS 127.0.0.2:9100)
+Pi's DHCP address (.10)   ──▶ /dev/rfcomm0 ──▶ printer 1   (address = auto, CUPS 127.0.0.1:9100)
+next free address (.11)   ──▶ /dev/rfcomm1 ──▶ printer 2   (address = next, CUPS 127.0.0.2:9100)
 ```
+
+`next` takes the first address after the Pi's that no device is using, and
+works with any router. `dhcp` gets the printer its own DHCP lease instead, on
+routers that support it ([ADMIN.md](docs/ADMIN.md#how-printer-addresses-work)).
 
 **Web admin page.** `star-admin` serves a password-protected page at
 `http://<hostname or IP address>` for joining a Wi-Fi network and seeing each printer's
@@ -114,6 +118,8 @@ and give each printer its own address; see [SETUP.md §7](docs/SETUP.md#7-severa
 * **[docs/LOGS.md](docs/LOGS.md)**: reading the logs over SSH: where each part
   logs, everyday recipes, logs from before a power cut, copying them to a
   laptop, and what the important lines mean
+* **[docs/TESTING.md](docs/TESTING.md)**: testing a Pi with mock printers
+  instead of real ones
 * **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)**: duplicate prints,
   "not connected", slow CUPS jobs, Bluetooth link and pairing errors, a second
   printer that doesn't show up, paper-out status
@@ -123,9 +129,10 @@ and give each printer its own address; see [SETUP.md §7](docs/SETUP.md#7-severa
 
 ```
 star_lan_bridge.py            the bridge (stdlib only)
-star_admin.py                 web admin: join Wi-Fi, show addresses, keep printer DHCP leases
+star_admin.py                 web admin: join Wi-Fi, show addresses, keep printer addresses
 star-dhcp-alias.sh            udhcpc hook that adds a printer's leased address
 tools/star_probe.py           read-only StarIO client: discover / status / etb
+tools/mock_printer.py         stand-in printer on a pty, for testing without printers
 examples/star-lan-bridge.conf two-printer config (/etc/star-lan-bridge.conf)
 systemd/star-lan-bridge.service
 systemd/star-admin.service    web admin on port 80
@@ -171,10 +178,12 @@ checking on a Pi (see [docs/SETUP.md](docs/SETUP.md)).
 * **Same subnet only.** Discovery is broadcast-based, so the POS must be on the
   bridge's subnet. Turn off Wi-Fi client isolation.
 * **One IP per printer.** Star clients find printers by IP and the ports are
-  fixed, so each extra printer needs its own DHCP lease. The Pi gets one per
-  printer by sending a different DHCP client ID. Routers that lease by MAC
-  address only can't do this, so on those networks run one printer per Pi
-  (see [ADMIN.md](docs/ADMIN.md#how-printer-addresses-work)).
+  fixed, so each extra printer needs its own address. With `address = next`
+  it's a free address the router doesn't know about: if another device later
+  takes it, the printer moves to the next free one. It shows up in the POS's
+  printer search at the new address; select it there again if the POS stored
+  the old one
+  (see [ADMIN.md](docs/ADMIN.md#next-the-next-free-address)).
 * **Plain-HTTP admin page.** Use it on the venue's staff network or a cable,
   not on open guest Wi-Fi.
 * **Anyone on the staff network can print.** As with a real Star LAN printer,
