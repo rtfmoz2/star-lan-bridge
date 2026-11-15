@@ -5,7 +5,7 @@ on your network, so StarIO-based POS apps can find it, print to it and show it
 as connected.
 
 ```
-POS app / laptop ──Wi-Fi──▶ Raspberry Pi ──Bluetooth SPP──▶ Star TSP143IIIBI
+POS app / laptop ──Wi-Fi──▶ Raspberry Pi ──Bluetooth SPP──▶ Star TSP100III (Bluetooth)
                             ├─ UDP 22222  Star discovery
                             ├─ TCP 9100   raw print + live status
                             ├─ TCP 9101   status polling
@@ -34,11 +34,36 @@ address and status, so a Pi can move to a new venue without SSH. See
 See [SETUP.md §7](docs/SETUP.md#7-several-printers) and
 [examples/star-lan-bridge.conf](examples/star-lan-bridge.conf).
 
+## The printer: Star TSP100III
+
+This project is built for and tested with the **Star TSP100III**, the name on the
+front of the printer, in its **Bluetooth** version. Other TSP100III and Star
+Bluetooth models that use the same Star raster commands should work the same way,
+but haven't been tested.
+
+You'll see **TSP143** in this repository as well. That isn't a different printer:
+
+* **It's the model number.** The TSP100III comes in several versions, identified
+  by the model number on its label: **TSP143IIIBI** for this one. `TSP1` is the
+  TSP100 family, `4` the auto-cutter version (`TSP113` is the tear-bar version),
+  `III` the third generation, and the suffix the connection: `BI` Bluetooth,
+  `LAN` Ethernet, `W` Wi-Fi, `U` USB.
+* **Star's CUPS driver uses it.** The driver file for this printer is
+  `star/tsp143.ppd` ("Star TSP100 Cutter").
+* **The bridge announces it.** To POS apps, the bridge pretends to be the LAN
+  version of the TSP100III, and a real one identifies itself in discovery as
+  `TSP143IIILAN (STR_T-001)`. The bridge sends exactly that, so apps accept it.
+  In Next Order POS, choose a **TSP100III** printer (the LAN and W options both
+  worked).
+* **The example names use it.** `TSP143` and `TSP143-2` in the config, CUPS queue
+  and log examples are only names; call your printers anything (letters, digits,
+  `.`, `_` or `-`).
+
 ## Tested with
 
 | Component | Version |
 |---|---|
-| Printers | 2 × Star TSP143IIIBI (TSP100III Bluetooth), 72 mm, on one Pi |
+| Printers | 2 × Star **TSP100III** Bluetooth (model number TSP143IIIBI), 72 mm, on one Pi |
 | Bridge host | Raspberry Pi 4 Model B on Wi-Fi, Raspberry Pi OS Trixie Lite 64-bit, BlueZ 5.82, Python 3.13 |
 | POS | SunMi D3 Pro, SunMi OS 4.0.79, **Next Order POS 6.0.0** |
 | Desktop | macOS printing through CUPS 2.4 + Star CUPS Driver 3.16.0 |

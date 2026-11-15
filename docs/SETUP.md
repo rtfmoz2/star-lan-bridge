@@ -1,7 +1,8 @@
 # Setting up a Raspberry Pi as a Star LAN bridge
 
 These are the steps used to build the reference setup: a Raspberry Pi 4 Model B
-running Raspberry Pi OS Trixie Lite (64-bit), a Bluetooth Star TSP143IIIBI, and
+running Raspberry Pi OS Trixie Lite (64-bit), a Bluetooth Star TSP100III (model
+number TSP143IIIBI; see [README, The printer](../README.md#the-printer-star-tsp100iii)), and
 a SunMi D3 Pro running Next Order POS. Any Debian-based host with classic
 Bluetooth and Python 3.8+ should work the same way.
 
@@ -16,7 +17,8 @@ authentication only* with your public key. Then find the Pi:
 
 ```bash
 # client (macOS shown): fill the ARP table, then look for Raspberry Pi MAC prefixes
-for i in $(seq 1 254); do ping -c1 -W 300 192.168.1.$i >/dev/null 2>&1 & done; wait
+NET=192.168.0   # the first three numbers of your network's addresses (example)
+for i in $(seq 1 254); do ping -c1 -W 300 $NET.$i >/dev/null 2>&1 & done; wait
 arp -an | grep -iE 'b8:27:eb|dc:a6:32|e4:5f:01|d8:3a:dd|2c:cf:67|28:cd:c1|88:a2:9e'
 ```
 
@@ -36,7 +38,7 @@ sudo nmcli --ask dev wifi connect "<SSID>" ifname wlan0   # prompts for the pass
 
 ## 3. Pair the printer
 
-Hold **PAIR** on the back of the TSP143IIIBI for about 5 seconds, until the blue LED
+Hold **PAIR** on the back of the TSP100III for about 5 seconds, until the blue LED
 flashes. Disconnect any phone or tablet that's paired to it, because it accepts a
 single connection.
 
