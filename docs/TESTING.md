@@ -4,7 +4,8 @@
 pseudo-terminal that answers status requests and counts ETBs like the printer,
 and saves each print job to a file instead of printing it. With two of them, a
 spare Pi can run the whole two-printer setup (discovery, status, printing and
-printer addresses) with no Bluetooth or paper.
+printer addresses) with no Bluetooth or paper. [MOCK.md](MOCK.md) explains how
+the mock works.
 
 `python3 -m unittest discover tests` covers the same logic on any machine. This
 page is for checking it on a real network with a real router.
