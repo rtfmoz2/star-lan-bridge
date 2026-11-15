@@ -43,6 +43,10 @@ Second printers on routers that ignore DHCP client IDs.
   printer that moved address; the phone-hotspot
   fallback in ADMIN.md; how the mock printer works (docs/MOCK.md); the config
   file, setting by setting (docs/CONFIG.md).
+* **Firewall add-ons:** the hardened firewall also loads `/etc/nftables.d/*.nft`
+  after its own rules, so add-ons (e.g. a VPN for remote SSH) can extend it,
+  and running `scripts/harden.sh` again no longer wipes them. harden.sh creates
+  the directory and never changes what's in it.
 
 ## 0.4.0 (2026-11-14)
 

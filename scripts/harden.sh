@@ -14,7 +14,8 @@
 # 1. CUPS: local only (no sharing, no remote admin, no web interface)
 # 2. SSH: key login only, no root, no forwarding (validated before reload)
 # 3. Bluetooth: not discoverable, not pairable
-# 4. Firewall: nftables default deny, venue LAN only (hardening/nftables.conf)
+# 4. Firewall: nftables default deny, venue LAN only (hardening/nftables.conf);
+#    add-on rules in /etc/nftables.d/*.nft are kept and loaded with it
 # 5. Logs and storage: journal kept across reboots but capped (100 MB, one
 #    month, 2 GB always free), apt doesn't keep downloaded packages, CUPS logs
 #    warnings only up to 1 MB.
@@ -53,6 +54,8 @@ bluetoothctl pairable off >/dev/null || true
 
 echo "== Firewall (rolls back in 3 minutes unless confirmed)"
 command -v nft >/dev/null || apt-get install -y nftables
+# Add-on rules (/etc/nftables.d/*.nft) are kept: the ruleset includes them.
+install -d -m 755 /etc/nftables.d
 nft -c -f "$REPO_DIR/hardening/nftables.conf"
 [[ -f /etc/nftables.conf && ! -f /etc/nftables.conf.pre-star ]] && cp /etc/nftables.conf /etc/nftables.conf.pre-star
 install -m 644 "$REPO_DIR/hardening/nftables.conf" /etc/nftables.conf
