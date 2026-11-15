@@ -10,7 +10,7 @@ with its source:
 
 | Tag | Meaning |
 |---|---|
-| **[observed]** | Seen directly in packet captures and bridge logs while building this project (Next Order POS 6.0.0 on a SunMi D3 Pro, two Bluetooth TSP100III printers (model TSP143IIIBI) on one Pi, macOS CUPS). |
+| **[observed]** | Seen directly in packet captures and bridge logs while building this project (Next Order POS 6.0.0 on a SunMi D3 Pro, two Bluetooth TSP100III printers (model TSP143IIIBI) on one device, macOS CUPS). |
 | **[reference]** | From the reverse-engineering notes in [gnaunited/tsp143-bridge](https://github.com/gnaunited/tsp143-bridge) (captured from a real TSP100IIILAN, firmware V2.2). |
 | **[Star]** | From Star Micronics' published command manuals (StarPRNT / Star Line Mode command specifications, ASB specification). |
 | **[unconfirmed]** | Seen but not decoded. Don't rely on it. |
@@ -126,9 +126,9 @@ subnet when several are up.
 * **Model.** The bridge always reports a TSP143IIILAN. Next Order POS accepted
   it with the printer configured in the app as a "TSP100IIIW" **[observed]**,
   so the app doesn't seem to require an exact model match.
-* **MAC.** The bridge reports the Pi's own MAC (`dc:a6:32:…`), not a Star
+* **MAC.** The bridge reports the device's own MAC (`dc:a6:32:…`), not a Star
   `00:11:62:…` address. No client rejected this **[observed]**. A client that
-  pins printers by MAC would need a stable value, and the Pi's MAC is stable.
+  pins printers by MAC would need a stable value, and the device's MAC is stable.
   With several printers, give each a distinct MAC (`mac =` in the config). The
   second printer in the reference setup reports its own Bluetooth MAC.
 
@@ -137,7 +137,7 @@ subnet when several are up.
 Clients key printers by IP address and the ports are fixed, so each printer
 gets its own IPv4 address on the host: secondary addresses on one interface
 work, including on Wi-Fi. In this project each extra printer's address is its
-own DHCP lease, requested with the Pi's MAC and a per-printer DHCP client ID
+own DHCP lease, requested with the device's MAC and a per-printer DHCP client ID
 (option 61); see [ADMIN.md](ADMIN.md#how-printer-addresses-work). The bridge then:
 
 * answers a **broadcast** query with **one reply per printer**, each sent from
@@ -147,7 +147,7 @@ own DHCP lease, requested with the Pi's MAC and a per-printer DHCP client ID
   than the `0.0.0.0` socket.
 
 Verified with two TSP100III Bluetooth printers, first with a fixed second address and
-then with only DHCP: printer 1 on the Pi's own DHCP address and printer 2 on its
+then with only DHCP: printer 1 on the device's own DHCP address and printer 2 on its
 own DHCP lease from a UniFi router. A broadcast got two replies,
 one per printer and each from its own address, and a unicast got only its own
 printer **[observed]**.

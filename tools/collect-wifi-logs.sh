@@ -1,8 +1,8 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT
 #
-# Collect everything needed to work out why the Pi didn't join a Wi-Fi
-# network, into one archive you can copy off the Pi. Reads only; changes
+# Collect everything needed to work out why the device didn't join a Wi-Fi
+# network, into one archive you can copy off the device. Reads only; changes
 # nothing unless you pass --debug-on or --debug-off.
 #
 #   ./tools/collect-wifi-logs.sh             collect into /tmp/wifi-logs-<date>.tar.gz
@@ -143,7 +143,7 @@ for f in NetworkManager.state seen-bssids timestamps; do
     [[ -r /var/lib/NetworkManager/$f ]] && cp "/var/lib/NetworkManager/$f" "$OUT/nm-$f.txt"
 done
 
-# 5. What the Pi can see --------------------------------------------------------
+# 5. What the device can see --------------------------------------------------------
 FIELDS=IN-USE,SSID,SSID-HEX,BSSID,MODE,CHAN,FREQ,RATE,SIGNAL,SECURITY,WPA-FLAGS,RSN-FLAGS
 run scan.txt nmcli -f "$FIELDS" dev wifi list ifname "$IFACE" --rescan no
 if [[ $SCAN -eq 1 ]]; then

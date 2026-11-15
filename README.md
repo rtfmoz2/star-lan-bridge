@@ -12,27 +12,29 @@ POS app / laptop ──Wi-Fi──▶ Raspberry Pi ──Bluetooth SPP──▶ 
                             └─ CUPS :631  (optional, for AirPrint / IPP)
 ```
 
-The Pi answers Star's discovery broadcast as a **TSP143IIILAN**, relays print
+The device answers Star's discovery broadcast as a **TSP143IIILAN**, relays print
 data to the printer over `/dev/rfcomm0`, and passes the printer's real status
 frames back. POS apps then confirm each job and don't reprint. It's a single
 Python file with no dependencies beyond the standard library.
 
-**Several printers.** One Pi can serve more than one Bluetooth printer. Each
+**Several printers.** One device can serve more than one Bluetooth printer. Each
 gets its own IP address, its own `/dev/rfcommN` and its own CUPS queue, and
 appears to POS apps as a separate Star LAN printer. No address is fixed:
 
 ```
-Pi's DHCP address (.10)   ──▶ /dev/rfcomm0 ──▶ printer 1   (address = auto, CUPS 127.0.0.1:9100)
-next free from .200       ──▶ /dev/rfcomm1 ──▶ printer 2   (address = next, CUPS 127.0.0.2:9100)
+Device (.10)
+next free address (.11)   ──▶ /dev/rfcomm0 ──▶ printer 1   (CUPS 127.0.0.1:9100)
+next free address (.12)   ──▶ /dev/rfcomm1 ──▶ printer 2   (CUPS 127.0.0.2:9100)
 ```
 
-`next` takes the first address from .200 up that no device is using, and
-works with any router. `dhcp` gets the printer its own DHCP lease instead, on
+With `address = next` in the config's `[network]` section, each printer takes
+the next address after the device's that no device is using (or from
+`[network] next_from`, e.g. .200, if set). It works with any router. `dhcp` gets the printer its own DHCP lease instead, on
 routers that support it ([ADMIN.md](docs/ADMIN.md#how-printer-addresses-work)).
 
 **Web admin page.** `star-admin` serves a password-protected page at
 `http://<hostname or IP address>` for joining a Wi-Fi network and seeing each printer's
-address and status, so a Pi can move to a new venue without SSH. See
+address and status, so a device can move to a new venue without SSH. See
 [docs/ADMIN.md](docs/ADMIN.md).
 
 See [SETUP.md §7](docs/SETUP.md#7-several-printers) and
@@ -67,7 +69,7 @@ You'll see **TSP143** in this repository as well. That isn't a different printer
 
 | Component | Version |
 |---|---|
-| Printers | 2 × Star **TSP100III** Bluetooth (model number TSP143IIIBI), 72 mm, on one Pi |
+| Printers | 2 × Star **TSP100III** Bluetooth (model number TSP143IIIBI), 72 mm, on one device |
 | Bridge host | Raspberry Pi 4 Model B on Wi-Fi, Raspberry Pi OS Trixie Lite 64-bit, BlueZ 5.82, Python 3.13 |
 | POS | SunMi D3 Pro, SunMi OS 4.0.79, **Next Order POS 6.0.0** |
 | Desktop | macOS printing through CUPS 2.4 + Star CUPS Driver 3.16.0 |
@@ -88,7 +90,7 @@ protocol, but haven't been tested with this bridge. Reports are welcome.
 ## Quick start
 
 ```bash
-# on the Pi, with the printer already paired and trusted (docs/SETUP.md §3)
+# on the device, with the printer already paired and trusted (docs/SETUP.md §3)
 git clone https://github.com/rtfmoz2/star-lan-bridge.git
 cd star-lan-bridge
 sudo ./scripts/install.sh --mac 00:11:62:AA:BB:CC --channel 1
@@ -107,7 +109,7 @@ and give each printer its own address; see [SETUP.md §7](docs/SETUP.md#7-severa
 
 ## Documentation
 
-* **[docs/SETUP.md](docs/SETUP.md)**: full setup, from flashing the Pi to
+* **[docs/SETUP.md](docs/SETUP.md)**: full setup, from flashing the device to
   pairing, the bridge, the optional CUPS queue, POS configuration and
   adding more printers
 * **[docs/CONFIG.md](docs/CONFIG.md)**: the config file, setting by setting
@@ -119,7 +121,7 @@ and give each printer its own address; see [SETUP.md §7](docs/SETUP.md#7-severa
 * **[docs/LOGS.md](docs/LOGS.md)**: reading the logs over SSH: where each part
   logs, everyday recipes, logs from before a power cut, copying them to a
   laptop, and what the important lines mean
-* **[docs/TESTING.md](docs/TESTING.md)**: testing a Pi with mock printers
+* **[docs/TESTING.md](docs/TESTING.md)**: testing a device with mock printers
   instead of real ones; [docs/MOCK.md](docs/MOCK.md) explains how the mock works
 * **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)**: duplicate prints,
   "not connected", slow CUPS jobs, Bluetooth link and pairing errors, a second
@@ -134,7 +136,7 @@ star_admin.py                 web admin: join Wi-Fi, show addresses, keep printe
 star-dhcp-alias.sh            udhcpc hook that adds a printer's leased address
 tools/star_probe.py           read-only StarIO client: discover / status / etb
 tools/mock_printer.py         stand-in printer on a pty, for testing without printers
-tools/collect-wifi-logs.sh    gather Wi-Fi logs and settings (no passwords) when the Pi won't join
+tools/collect-wifi-logs.sh    gather Wi-Fi logs and settings (no passwords) when the device won't join
 examples/star-lan-bridge.conf two-printer config (/etc/star-lan-bridge.conf)
 systemd/star-lan-bridge.service
 systemd/star-admin.service    web admin on port 80
@@ -142,7 +144,7 @@ avahi/star-admin.service      Bonjour advert for the admin page
 systemd/rfcomm-printer.service    template; install.sh fills in MAC and channel
 scripts/install.sh            install bridge + rfcomm binding, optionally repoint CUPS
 scripts/install-admin.sh      install the web admin page
-scripts/harden.sh             lock the Pi down for deployment (firewall, SSH, CUPS, updates)
+scripts/harden.sh             lock the device down for deployment (firewall, SSH, CUPS, updates)
 hardening/                    firewall, SSH and update settings used by harden.sh
 scripts/setup-cups.sh         optional: CUPS + Star driver build + shared queue
 scripts/uninstall.sh
@@ -154,7 +156,7 @@ docs/                         setup, protocol and troubleshooting docs
 ## Tests and CI
 
 ```bash
-python3 -m unittest discover tests        # unit, protocol and fuzz tests; no Pi or printer needed
+python3 -m unittest discover tests        # unit, protocol and fuzz tests; no device or printer needed
 ```
 
 GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs on every
@@ -168,7 +170,7 @@ pull request and on pushes to `main`:
   `systemd-analyze verify` on the unit files.
 
 CI can't exercise Bluetooth, real printers, the POS or Wi-Fi. Those still need
-checking on a Pi (see [docs/SETUP.md](docs/SETUP.md)).
+checking on a device (see [docs/SETUP.md](docs/SETUP.md)).
 
 ## Limitations
 

@@ -19,7 +19,7 @@ converts to the LAN shape.
   kill -USR1 <pid>   toggle "out of paper"
   kill -USR2 <pid>   toggle "cover open"
 
-Example (two printers on a test Pi, no Bluetooth needed):
+Example (two printers on a test device, no Bluetooth needed):
   python3 tools/mock_printer.py --link /run/mock-printer/TSP143 &
   python3 tools/mock_printer.py --link /run/mock-printer/TSP143-2 &
 
