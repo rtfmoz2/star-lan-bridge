@@ -124,6 +124,9 @@ share.
 | `[TSP143-2] no address yet (address = dhcp)` | That printer is waiting for its DHCP lease |
 | `star-dhcp: TSP143-2: bound <printer-2-address>/24 on wlan0, lease 43200s` | Printer 2 got its address |
 | `dhcp: TSP143-2 lost its address <printer-2-address>; re-adding` | Something removed the address; star-admin put it back |
+| `next: TSP143-2 is using <printer-2-address>/24 on wlan0` | Printer 2 claimed a free address (`address = next`) |
+| `next: another device is also using <printer-2-address>; TSP143-2 keeps it…` | Another device answers on the printer's address; the admin page shows a warning and a **Find another address** button |
+| `next: moving TSP143-2 off <printer-2-address>, as asked on the admin page…` | Someone pressed **Find another address**; re-add the printer in the POS at its new address |
 | `(... similar suppressed)` | Repeated messages are logged at most once a minute; this is how many were skipped |
 
 ## How much space the logs use

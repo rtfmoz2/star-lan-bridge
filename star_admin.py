@@ -347,6 +347,8 @@ def printers() -> list[dict]:
         note = ADDR.notes.get(p["name"])
         if note:
             info["note"] = note
+        if p["name"] in ADDR.conflict:
+            info["conflict"] = True
         if mode == "dhcp":
             lease = read_lease_file(p["name"])
             if lease.get("obtained") and lease.get("lease"):
@@ -528,8 +530,9 @@ def active_connection(iface: str) -> str | None:
 # ---------------------------------------------------------------------------
 # Next free address (`address = next`)
 # ---------------------------------------------------------------------------
-NEXT_SPAN = 32          # how far past the Pi's own address to look
-DEFEND_EVERY = 120      # seconds between checks that nobody else took a claimed address
+NEXT_SPAN = 32          # how many addresses to look through from the start
+NEXT_FROM = "200"       # default start: .200, above where most routers hand out leases
+DEFEND_EVERY = 120      # seconds between checks for another device on a claimed address (warns only)
 ZERO_IP = b"\0" * 4
 
 
@@ -602,14 +605,39 @@ def arp_announce(iface: str, ip: str, count: int = 2):
         s.close()
 
 
+def next_start(host: str, prefix: int, next_from: str | None = NEXT_FROM) -> int | None:
+    """The first address to try for a `next` printer, as an int, or None for
+    "just after the Pi's own address".
+
+    next_from is a host number (200 means .200 in the Pi's /24), a full IPv4
+    address, or "after". A start outside the Pi's subnet counts as "after".
+    """
+    v = (next_from or NEXT_FROM).strip().lower()
+    if v == "after":
+        return None
+    net = ipaddress.ip_interface(f"{host}/{prefix}").network
+    try:
+        if v.isdigit():
+            base = int(ipaddress.ip_address(host)) & 0xFFFFFF00 if prefix <= 24 else int(net.network_address)
+            a = ipaddress.ip_address(base + int(v))
+        else:
+            a = ipaddress.ip_address(v)
+    except ValueError:
+        return None
+    if a not in net or a in (net.network_address, net.broadcast_address):
+        return None
+    return int(a)
+
+
 def next_candidates(host: str, prefix: int, taken: set[str], remembered: str | None = None,
-                    span: int = NEXT_SPAN) -> list[str]:
+                    span: int = NEXT_SPAN, next_from: str | None = NEXT_FROM) -> list[str]:
     """Addresses to try for a `next` printer, best first.
 
     The address this printer had on this network before (so the POS keeps
-    finding it), then host+1, host+2, ... up to span past the Pi's own address,
-    staying inside the subnet and skipping the broadcast address and anything
-    in taken (the Pi's addresses, the gateway, other printers).
+    finding it), then up to span addresses upward from next_from (default .200),
+    then up to span addresses just after the Pi's own as a last resort. Stays
+    inside the subnet and skips the broadcast address and anything in taken
+    (the Pi's addresses, the gateway, other printers).
     """
     net = ipaddress.ip_interface(f"{host}/{prefix}").network
     out = []
@@ -621,14 +649,16 @@ def next_candidates(host: str, prefix: int, taken: set[str], remembered: str | N
         except ValueError:
             pass
     h = int(ipaddress.ip_address(host))
-    for i in range(1, span + 1):
-        if h + i > 0xFFFFFFFF:
-            break
-        a = ipaddress.ip_address(h + i)
-        if a not in net or a == net.broadcast_address:
-            break
-        if str(a) not in taken and str(a) not in out:
-            out.append(str(a))
+    start = next_start(host, prefix, next_from)
+    for first in ([start] if start is not None else []) + [h + 1]:
+        for n in range(first, first + span):
+            if n > 0xFFFFFFFF:
+                break
+            a = ipaddress.ip_address(n)
+            if a not in net or a == net.broadcast_address:
+                break
+            if str(a) not in taken and str(a) not in out:
+                out.append(str(a))
     return out
 
 
@@ -689,6 +719,10 @@ class AddressManager:
         self.next_start: dict[str, float] = {}
         self.next_check: dict[str, float] = {}
         self.fallback: set[str] = set()      # dhcp printers using `next` on this network
+        self.next_from: dict[str, str | None] = {}   # per-printer next_from from the config
+        self.conflict: set[str] = set()      # `next` printers whose address another device answers for
+        self.move_requests: set[str] = set() # printers to move, from the page's "Find another address"
+        self.lock = threading.Lock()
         self.notes: dict[str, str] = {}      # shown on the page, per printer
 
     def run_forever(self):
@@ -703,10 +737,11 @@ class AddressManager:
     def wanted(self) -> dict[str, str]:
         """{printer: "dhcp" | "next"} in config order."""
         try:
-            return {p["name"]: p["address"].lower() for p in slb.read_printer_config(BRIDGE_CONF)
-                    if p["address"].lower() in ("dhcp", "next")}
+            plist = [p for p in slb.read_printer_config(BRIDGE_CONF) if p["address"].lower() in ("dhcp", "next")]
         except (OSError, ValueError):
             return {}
+        self.next_from = {p["name"]: p.get("next_from") for p in plist}
+        return {p["name"]: p["address"].lower() for p in plist}
 
     # -- network ------------------------------------------------------------
     def tick(self):
@@ -815,19 +850,46 @@ class AddressManager:
         log.info("dhcp: requesting an address for %s on %s", name, iface)
 
     # -- next -----------------------------------------------------------------
+    def request_move(self, name: str):
+        """From the page: move a `next` printer to another free address on the next pass."""
+        if name not in self.conflict:
+            raise ValueError("Only a printer whose address another device is using can be moved.")
+        with self.lock:
+            self.move_requests.add(name)
+
     def keep_next(self, name: str, iface: str, conn: str):
         lease = read_lease_file(name)
         have = {a["ip"] for a in self.own_addresses(iface)}
+        with self.lock:
+            move = name in self.move_requests
+            self.move_requests.discard(name)
+        if move and lease.get("mode") == "next" and lease.get("ip"):
+            log.warning("next: moving %s off %s, as asked on the admin page; select it again in the POS",
+                        name, lease["ip"])
+            self.drop_lease(name)
+            self.forget_claim(conn, name)
+            self.conflict.discard(name)
+            self.notes.pop(name, None)
+            have.discard(lease["ip"])
+            lease = {}
         if lease.get("mode") == "next" and lease.get("interface") == iface and lease.get("ip"):
             if time.time() < self.next_check.get(name, 0):
                 return
             self.next_check[name] = time.time() + DEFEND_EVERY
-            if not arp_in_use(iface, lease["ip"], probes=2):
-                return
-            log.warning("next: another device is now using %s; moving %s to another address", lease["ip"], name)
-            self.drop_lease(name)
-            self.forget_claim(conn, name)
-            have.discard(lease["ip"])
+            # Once set, a printer's address never moves (the POS stores it), so
+            # another device turning up on it is reported, not acted on.
+            if arp_in_use(iface, lease["ip"], probes=2):
+                if name not in self.conflict:
+                    log.warning("next: another device is also using %s; %s keeps it. Give that device "
+                                "another address, or reserve %s in the router", lease["ip"], name, lease["ip"])
+                    self.conflict.add(name)
+                self.notes[name] = (f"Another device is also using {lease['ip']}. The printer keeps it; "
+                                    "move the other device, or reserve the address in the router.")
+            elif name in self.conflict:
+                log.info("next: %s is no longer used by another device", lease["ip"])
+                self.conflict.discard(name)
+                self.notes.pop(name, None)
+            return
         elif lease.get("ip"):
             self.drop_lease(name)  # a DHCP lease or another interface's address
         if time.time() < self.next_start.get(name, 0):
@@ -840,15 +902,16 @@ class AddressManager:
         if gw:
             taken.add(gw)
         remembered = load_claims().get(conn, {}).get(name)
-        for cand in next_candidates(host[0], host[1], taken, remembered):
+        for cand in next_candidates(host[0], host[1], taken, remembered,
+                                    next_from=self.next_from.get(name)):
             if arp_in_use(iface, cand):
                 log.info("next: %s is in use; trying the next address for %s", cand, name)
                 continue
             self.claim(name, iface, conn, cand, host[1])
             return
-        log.warning("next: no free address within %d of %s for %s; trying again in a minute",
-                    NEXT_SPAN, host[0], name)
-        self.notes[name] = f"No free address found after {host[0]}; trying again."
+        log.warning("next: no free address for %s near next_from or after %s; trying again in a minute",
+                    name, host[0])
+        self.notes[name] = "No free address found on this network; trying again."
         self.next_start[name] = time.time() + 60
 
     def claim(self, name: str, iface: str, conn: str, ip_: str, prefix: int):
@@ -1125,6 +1188,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self.forget(data)
             if path == "/api/ssh":
                 return self.set_ssh(data, client)
+            if path == "/api/move":
+                ADDR.request_move(str(data.get("printer", "")))
+                return self.json(200, {"ok": True})
             self.json(404, {"error": "Not found."})
         except ValueError as e:
             self.json(400, {"error": str(e)})
@@ -1380,7 +1446,8 @@ function render(s) {
       <dt>Device</dt><dd class="mono">${esc(p.device)}</dd>
       <dt>CUPS</dt><dd class="mono">socket://${esc(p.local||"127.0.0.1")}:9100</dd>
       <dt>Status</dt><dd><span class="pill ${esc(st.state)}" title="${esc(st.raw)}">${esc(st.text)}</span></dd></dl>
-      ${p.note ? `<p class="sub" style="margin-top:8px">${esc(p.note)}</p>` : ""}</div>`;
+      ${p.note ? `<p class="sub" style="margin-top:8px">${esc(p.note)}</p>` : ""}
+      ${p.conflict ? `<div class="row" style="margin-top:8px"><button class="ghost" data-move="${esc(p.name)}">Find another address</button></div>` : ""}</div>`;
   }).join("");
   $("saved").innerHTML = s.saved.length ? s.saved.map(n => `<tr><td><strong>${esc(n.name)}</strong>
       ${n.active?'<span class="pill ok">in use</span>':""}</td>
@@ -1453,6 +1520,14 @@ $("saved").onclick = async e => {
   try { await post("/api/forget", {uuid:b.dataset.forget}); }
   catch (err) { $("join-msg").innerHTML = `<div class="msg bad">${esc(err.message)}</div>`; }
   refresh();
+};
+$("printers").onclick = async e => {
+  const b = e.target.closest("button[data-move]"); if (!b) return;
+  if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = "Tap again: the POS will need the new address"; return; }
+  b.disabled = true; b.textContent = "Finding another address…";
+  try { await post("/api/move", {printer:b.dataset.move}); }
+  catch (err) { b.textContent = err.message; }
+  setTimeout(refresh, 6000);
 };
 $("logout").onclick = async () => { try { await post("/logout"); } catch (e) {} location.reload(); };
 refresh(); setInterval(refresh, 5000);

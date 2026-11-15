@@ -4,11 +4,14 @@
 
 Second printers on routers that ignore DHCP client IDs.
 
-* **`address = next`:** a printer takes the first free address after the
-  Pi's own (Pi on .10: .11 if nothing answers on it, else .12, ...). star-admin
-  checks with ARP probes, remembers the address per Wi-Fi network so the
-  printer gets it back after a reboot, re-checks it every two minutes and moves
-  it if another device turns up. Works with any router and needs no fixed
+* **`address = next`:** a printer takes the first free address from .200 up
+  (.200 if nothing answers on it, else .201, ...), where routers rarely hand
+  out leases. `next_from` sets the start: a host number, a full address, or
+  `after` for just after the Pi's own. star-admin checks with ARP probes and
+  remembers the address per Wi-Fi network, so the printer gets it back after
+  a reboot. A printer never moves by itself: if another device also answers
+  for its address, the admin page warns under the printer and offers a
+  **Find another address** button. Works with any router and needs no fixed
   address. The example config now uses it for printer 2.
 * **`address = dhcp` falls back to `next`** when the router hands back the
   Pi's own address (it leases by MAC and ignores the client ID). The DHCP hook
@@ -33,8 +36,10 @@ Second printers on routers that ignore DHCP client IDs.
   in hex, what the Pi can see, Wi-Fi country), without passwords; `--debug-on`
   and `--debug-off` switch NetworkManager's detailed Wi-Fi logging.
 * **Docs:** troubleshooting for a Pi that won't join the venue Wi-Fi, a bridge
-  stuck restarting, and a printer that moved address; the phone-hotspot
-  fallback in ADMIN.md; how the mock printer works (docs/MOCK.md).
+  stuck restarting, a printer whose address another device is using, and a
+  printer that moved address; the phone-hotspot
+  fallback in ADMIN.md; how the mock printer works (docs/MOCK.md); the config
+  file, setting by setting (docs/CONFIG.md).
 
 ## 0.4.0 (2026-11-14)
 

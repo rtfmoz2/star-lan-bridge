@@ -134,11 +134,11 @@ IP and the ports (22222, 9100, 9101) are fixed. No address is fixed in the
 config, so the same configuration works on any venue network:
 
 * **One printer** uses the Pi's own DHCP address (`address = auto`).
-* **Each extra printer** uses the next free address after the Pi's
-  (`address = next`): with the Pi on `.10`, `.11` if no device answers on it,
-  otherwise `.12`, and so on. The `star-admin` service ([ADMIN.md](ADMIN.md))
-  checks, claims and remembers it, so the printer keeps the same address. This
-  works with any router.
+* **Each extra printer** uses a free address high in the range
+  (`address = next`): `.200` if no device answers on it, otherwise `.201`, and
+  so on (`next_from` changes the start). The `star-admin` service
+  ([ADMIN.md](ADMIN.md)) checks, claims and remembers it, and the printer
+  never moves by itself. This works with any router.
 * Or **its own DHCP lease** (`address = dhcp`), on routers that honour a
   separate DHCP client ID per printer, UniFi included. On routers that don't,
   the printer falls back to `next` by itself.

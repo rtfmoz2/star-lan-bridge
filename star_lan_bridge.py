@@ -426,6 +426,17 @@ def resolve_address(name: str, value: str, lease_dir: str = LEASE_DIR) -> str | 
     return value
 
 
+def valid_next_from(v: str) -> bool:
+    """next_from: a host number (1-254), a full IPv4 address, or 'after'."""
+    if v.lower() == "after" or (v.isdigit() and 1 <= int(v) <= 254):
+        return True
+    try:
+        socket.inet_aton(v)
+        return v.count(".") == 3
+    except OSError:
+        return False
+
+
 def read_printer_config(path: str) -> list[dict]:
     """[printer:NAME] sections as dicts, without resolving addresses."""
     cp = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
@@ -444,8 +455,12 @@ def read_printer_config(path: str) -> list[dict]:
         local = s.get("local")
         if local:
             socket.inet_aton(local)
+        next_from = (s.get("next_from") or "").strip() or None
+        if next_from is not None and not valid_next_from(next_from):
+            raise ValueError(f"[{section}] next_from must be a host number (1-254), an IPv4 address "
+                             f"or 'after', not {next_from!r}")
         out.append({"name": name, "device": s["device"], "address": s["address"].strip(),
-                    "local": local, "mac": s.get("mac")})
+                    "local": local, "mac": s.get("mac"), "next_from": next_from})
     if not out:
         raise ValueError(f"{path}: no [printer:NAME] sections")
     return out

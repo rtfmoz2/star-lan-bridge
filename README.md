@@ -23,10 +23,10 @@ appears to POS apps as a separate Star LAN printer. No address is fixed:
 
 ```
 Pi's DHCP address (.10)   ──▶ /dev/rfcomm0 ──▶ printer 1   (address = auto, CUPS 127.0.0.1:9100)
-next free address (.11)   ──▶ /dev/rfcomm1 ──▶ printer 2   (address = next, CUPS 127.0.0.2:9100)
+next free from .200       ──▶ /dev/rfcomm1 ──▶ printer 2   (address = next, CUPS 127.0.0.2:9100)
 ```
 
-`next` takes the first address after the Pi's that no device is using, and
+`next` takes the first address from .200 up that no device is using, and
 works with any router. `dhcp` gets the printer its own DHCP lease instead, on
 routers that support it ([ADMIN.md](docs/ADMIN.md#how-printer-addresses-work)).
 
@@ -110,6 +110,7 @@ and give each printer its own address; see [SETUP.md §7](docs/SETUP.md#7-severa
 * **[docs/SETUP.md](docs/SETUP.md)**: full setup, from flashing the Pi to
   pairing, the bridge, the optional CUPS queue, POS configuration and
   adding more printers
+* **[docs/CONFIG.md](docs/CONFIG.md)**: the config file, setting by setting
 * **[docs/ADMIN.md](docs/ADMIN.md)**: the web page (join Wi-Fi, see addresses),
   how printers get DHCP addresses, and its security
 * **[docs/PROTOCOL.md](docs/PROTOCOL.md)**: Star Discovery (UDP 22222), ASB
@@ -180,10 +181,9 @@ checking on a Pi (see [docs/SETUP.md](docs/SETUP.md)).
   bridge's subnet. Turn off Wi-Fi client isolation.
 * **One IP per printer.** Star clients find printers by IP and the ports are
   fixed, so each extra printer needs its own address. With `address = next`
-  it's a free address the router doesn't know about: if another device later
-  takes it, the printer moves to the next free one. It shows up in the POS's
-  printer search at the new address; select it there again if the POS stored
-  the old one
+  it's a free address the router doesn't know about. It never moves by
+  itself: if another device later uses it too, the admin page warns and offers
+  a **Find another address** button
   (see [ADMIN.md](docs/ADMIN.md#next-the-next-free-address)).
 * **Plain-HTTP admin page.** Use it on the venue's staff network or a cable,
   not on open guest Wi-Fi.
