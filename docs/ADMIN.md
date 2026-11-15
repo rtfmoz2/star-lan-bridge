@@ -17,7 +17,7 @@ the device has.
 | Section | What it shows or does |
 |---|---|
 | **Network** | Current Wi-Fi network and signal, every IP address on the device with whose it is ("this device" or a printer) and its source (DHCP, next available or fixed), the gateway |
-| **Printers** | Each printer's address to enter in the POS, how it got that address, Bluetooth link, status (Ready, Out of paper, Switched off or out of Bluetooth range) and its CUPS URL. A warning and a **Find another address** button if another device is using the printer's address |
+| **Printers** | Each printer's address, how it got that address, Bluetooth link, status (Ready, Out of paper, Switched off or out of Bluetooth range) and its CUPS URL. A warning and a **Find another address** button if another device is using the printer's address |
 | **Join a Wi-Fi network** | Scan, tap a network, enter its password, then **Connect now** or **Save for later** |
 | **Saved networks** | Networks the device will join on its own; **Forget** removes one (not the one in use) |
 

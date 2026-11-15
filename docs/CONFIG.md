@@ -45,9 +45,9 @@ address.
 |---|---|---|
 | `[printer:NAME]` | yes | The printer's name, shown on the admin page and in the logs. Letters, digits, `.`, `_` and `-`, up to 32 characters. |
 | `device` | yes | The Bluetooth serial port the bridge talks through, one per printer: `/dev/rfcomm0`, `/dev/rfcomm1`. On a test device it can point at a mock printer instead ([TESTING.md](TESTING.md)). |
-| `address` | yes, unless `[network]` has one | The IP address the POS uses for this printer (choices below). Overrides `[network] address`. |
+| `address` | yes, unless `[network]` has one | The IP address for this printer (choices below). Overrides `[network] address`. |
 | `local` | no | A private address for printing from the device itself through CUPS, as `socket://<local>:9100`. Give each printer a different one: `127.0.0.1`, `127.0.0.2`. |
-| `mac` | no | The hardware address reported when the POS searches for printers. Give each printer a different one; the printer's own Bluetooth MAC works well. Default: the MAC of the device's network interface. |
+| `mac` | no | The hardware address for this printer, reported when an app searches for printers. Give each printer a different one; the printer's own Bluetooth MAC works well. Default: the MAC of the device's network interface. |
 
 ### `address`
 
