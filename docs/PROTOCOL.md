@@ -306,7 +306,7 @@ That's unlikely, and far less harmful than duplicate receipts.
 | Traffic | What it is | Bridge |
 |---|---|---|
 | UDP 3289 broadcast, 14 bytes `"EPSONQ"` + NULs, every ~10 s while searching | Epson ENPC printer discovery **[observed]** | Not answered |
-| mDNS queries for `_ipp`, `_ipps`, `_printer`, `_pdl-datastream` | Generic OS printer browsing **[observed]** | Answered by Avahi/CUPS for the IPP queue, not by the bridge |
+| mDNS queries for `_ipp`, `_ipps`, `_printer`, `_pdl-datastream` | Generic OS printer browsing **[observed]** | Not answered: CUPS isn't shared, and the bridge doesn't use mDNS |
 
 A real TSP100IIILAN doesn't answer mDNS, SNMP (UDP 161) or UDP 3289
 **[reference]**, so the bridge doesn't either.

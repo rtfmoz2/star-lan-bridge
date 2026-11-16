@@ -1,0 +1,113 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1030 400" width="1030" height="400" role="img" aria-labelledby="t d">
+  <title id="t">How print traffic flows through star-lan-bridge</title>
+  <desc id="d">A POS app on Wi-Fi talks to the device running one star-lan-bridge service. One Star discovery listener on UDP 22222 answers for every printer. Each printer has its own IP address on the network, with TCP 9100 for printing with live status and TCP 9101 for status polling. The device relays each printer's jobs over its own Bluetooth SPP link (rfcomm0, rfcomm1) to a Bluetooth-only Star TSP100III, and passes the printer's status back.</desc>
+  <style>
+    .card { fill: #f8fafc; stroke: #e2e8f0; }
+    .box { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1.5; }
+    .dev { fill: #eff6ff; stroke: #2563eb; stroke-width: 2; }
+    .grp { fill: #dbeafe; stroke: #93c5fd; stroke-width: 1.2; }
+    .chip { fill: #ffffff; stroke: #bfdbfe; stroke-width: 1.2; }
+    .ink { fill: #0f172a; }
+    .muted { fill: #64748b; }
+    .acc { fill: #1d4ed8; }
+    .bt { fill: #6d28d9; }
+    .wire { stroke: #64748b; stroke-width: 1.6; fill: none; }
+    .btw { stroke: #7c3aed; stroke-width: 2.2; fill: none; }
+    .ah { fill: #64748b; }
+    .ahb { fill: #7c3aed; }
+    .icon { fill: #e2e8f0; stroke: #475569; stroke-width: 1.5; }
+    .paper { fill: #ffffff; stroke: #475569; stroke-width: 1.2; }
+    .line { stroke: #94a3b8; stroke-width: 1.4; }
+    text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    @media (prefers-color-scheme: dark) {
+      .card { fill: #0f172a; stroke: #1e293b; }
+      .box { fill: #1e293b; stroke: #334155; }
+      .dev { fill: #172554; stroke: #60a5fa; }
+      .grp { fill: #1e3a8a; stroke: #3b82f6; }
+      .chip { fill: #0f172a; stroke: #1e40af; }
+      .ink { fill: #e2e8f0; }
+      .muted { fill: #94a3b8; }
+      .acc { fill: #93c5fd; }
+      .bt { fill: #c4b5fd; }
+      .wire { stroke: #94a3b8; }
+      .btw { stroke: #a78bfa; }
+      .ah { fill: #94a3b8; }
+      .ahb { fill: #a78bfa; }
+      .icon { fill: #334155; stroke: #cbd5e1; }
+      .paper { fill: #f8fafc; stroke: #cbd5e1; }
+      .line { stroke: #94a3b8; }
+    }
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0 0 L10 5 L0 10 z"/></marker>
+    <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path class="ahb" d="M0 0 L10 5 L0 10 z"/></marker>
+  </defs>
+
+  <rect class="card" x="0.5" y="0.5" width="1029" height="399" rx="16"/>
+
+  <!-- POS -->
+  <rect class="box" x="24" y="176" width="196" height="92" rx="12"/>
+  <text class="ink" x="122" y="212" text-anchor="middle" font-size="17" font-weight="600">POS app</text>
+  <text class="muted" x="122" y="236" text-anchor="middle" font-size="12.5">finds and prints to</text>
+  <text class="muted" x="122" y="253" text-anchor="middle" font-size="12.5">Star LAN printers</text>
+  <text class="muted" x="275" y="62" text-anchor="middle" font-size="12" font-weight="600" letter-spacing="0.5">WI-FI / LAN</text>
+  <path class="wire" d="M220 214 C 268 214, 290 120, 348 120" marker-end="url(#a)"/>
+  <path class="wire" d="M220 222 C 268 222, 290 206, 348 206" marker-end="url(#a)"/>
+  <path class="wire" d="M220 230 C 268 230, 290 312, 348 312" marker-end="url(#a)"/>
+
+  <!-- The device: one star-lan-bridge service for every printer -->
+  <rect class="dev" x="330" y="22" width="340" height="356" rx="16"/>
+  <text class="ink" x="500" y="54" text-anchor="middle" font-size="18" font-weight="700">Raspberry Pi</text>
+  <text class="acc mono" x="500" y="76" text-anchor="middle" font-size="13">star-lan-bridge (one service)</text>
+
+  <rect class="chip" x="350" y="98" width="300" height="44" rx="9"/>
+  <text class="acc mono" x="366" y="125" font-size="13.5" font-weight="700">UDP 22222</text>
+  <text class="ink" x="474" y="125" font-size="13.5">Discovery, all printers</text>
+
+  <rect class="grp" x="350" y="156" width="300" height="100" rx="11"/>
+  <text class="acc" x="364" y="175" font-size="11" font-weight="700" letter-spacing="0.6">PRINTER 1 · IP ADDRESS</text>
+  <rect class="chip" x="360" y="184" width="280" height="30" rx="7"/>
+  <text class="acc mono" x="374" y="204" font-size="13" font-weight="700">TCP 9100</text>
+  <text class="ink" x="474" y="204" font-size="13">Print + live status</text>
+  <rect class="chip" x="360" y="219" width="280" height="30" rx="7"/>
+  <text class="acc mono" x="374" y="239" font-size="13" font-weight="700">TCP 9101</text>
+  <text class="ink" x="474" y="239" font-size="13">Status polling</text>
+
+  <rect class="grp" x="350" y="262" width="300" height="100" rx="11"/>
+  <text class="acc" x="364" y="281" font-size="11" font-weight="700" letter-spacing="0.6">PRINTER 2 · IP ADDRESS</text>
+  <rect class="chip" x="360" y="290" width="280" height="30" rx="7"/>
+  <text class="acc mono" x="374" y="310" font-size="13" font-weight="700">TCP 9100</text>
+  <text class="ink" x="474" y="310" font-size="13">Print + live status</text>
+  <rect class="chip" x="360" y="325" width="280" height="30" rx="7"/>
+  <text class="acc mono" x="374" y="345" font-size="13" font-weight="700">TCP 9101</text>
+  <text class="ink" x="474" y="345" font-size="13">Status polling</text>
+
+  <!-- Bluetooth links -->
+  <text class="bt" x="730" y="140" text-anchor="middle" font-size="12" font-weight="700" letter-spacing="0.5">BLUETOOTH SPP</text>
+  <text class="bt mono" x="730" y="196" text-anchor="middle" font-size="11">rfcomm0</text>
+  <path class="btw" d="M672 206 L 788 206" marker-start="url(#b)" marker-end="url(#b)"/>
+  <text class="bt mono" x="730" y="302" text-anchor="middle" font-size="11">rfcomm1</text>
+  <path class="btw" d="M672 312 L 788 312" marker-start="url(#b)" marker-end="url(#b)"/>
+  <text class="muted" x="730" y="226" text-anchor="middle" font-size="11">jobs → · ← status</text>
+  <text class="muted" x="730" y="332" text-anchor="middle" font-size="11">jobs → · ← status</text>
+
+  <!-- Printers -->
+  <rect class="box" x="790" y="160" width="216" height="92" rx="12"/>
+  <rect class="paper" x="818" y="182" width="32" height="14" rx="2"/>
+  <rect class="icon" x="808" y="193" width="52" height="28" rx="6"/>
+  <rect class="paper" x="818" y="217" width="32" height="20" rx="2"/>
+  <line class="line" x1="823" y1="225" x2="845" y2="225"/>
+  <line class="line" x1="823" y1="231" x2="840" y2="231"/>
+  <text class="ink" x="874" y="203" font-size="15" font-weight="600">Star TSP100III</text>
+  <text class="muted" x="874" y="223" font-size="12.5">Printer 1 · Bluetooth</text>
+
+  <rect class="box" x="790" y="266" width="216" height="92" rx="12"/>
+  <rect class="paper" x="818" y="288" width="32" height="14" rx="2"/>
+  <rect class="icon" x="808" y="299" width="52" height="28" rx="6"/>
+  <rect class="paper" x="818" y="323" width="32" height="20" rx="2"/>
+  <line class="line" x1="823" y1="331" x2="845" y2="331"/>
+  <line class="line" x1="823" y1="337" x2="840" y2="337"/>
+  <text class="ink" x="874" y="309" font-size="15" font-weight="600">Star TSP100III</text>
+  <text class="muted" x="874" y="329" font-size="12.5">Printer 2 · Bluetooth</text>
+</svg>

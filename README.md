@@ -4,13 +4,7 @@ Make a **Bluetooth-only Star receipt printer** look like a **Star LAN printer**
 on your network, so StarIO-based POS apps can find it, print to it and show it
 as connected.
 
-```
-POS app / laptop ──Wi-Fi──▶ Raspberry Pi ──Bluetooth SPP──▶ Star TSP100III (Bluetooth)
-                            ├─ UDP 22222  Star discovery
-                            ├─ TCP 9100   raw print + live status
-                            ├─ TCP 9101   status polling
-                            └─ CUPS :631  (optional, for AirPrint / IPP)
-```
+![A POS app on Wi-Fi reaches the device, where one star-lan-bridge service runs. One Star discovery listener on UDP 22222 answers for all printers; each printer has its own IP address with TCP 9100 (print and live status) and TCP 9101 (status polling). The device sends each printer's jobs over its own Bluetooth SPP link (rfcomm0, rfcomm1) to a Bluetooth-only Star TSP100III and passes its status back.](docs/images/traffic-flow.svg)
 
 The device answers Star's discovery broadcast as a **TSP143IIILAN**, relays print
 data to the printer over `/dev/rfcomm0`, and passes the printer's real status
@@ -72,7 +66,6 @@ You'll see **TSP143** in this repository as well. That isn't a different printer
 | Printers | 2 × Star **TSP100III** Bluetooth (model number TSP143IIIBI), 72 mm, on one device |
 | Bridge host | Raspberry Pi 4 Model B on Wi-Fi, Raspberry Pi OS Trixie Lite 64-bit, BlueZ 5.82, Python 3.13 |
 | POS | SunMi D3 Pro, SunMi OS 4.0.79, **Next Order POS 6.0.0** |
-| Desktop | macOS printing through CUPS 2.4 + Star CUPS Driver 3.16.0 |
 
 Results on that setup:
 
@@ -148,7 +141,7 @@ scripts/install.sh            install bridge + rfcomm binding, optionally repoin
 scripts/install-admin.sh      install the web admin page
 scripts/harden.sh             lock the device down for deployment (firewall, SSH, CUPS, updates)
 hardening/                    firewall, SSH and update settings used by harden.sh
-scripts/setup-cups.sh         optional: CUPS + Star driver build + shared queue
+scripts/setup-cups.sh         optional: CUPS + Star driver build + local queue
 scripts/uninstall.sh
 tests/                        unit tests: python3 -m unittest discover tests
 .github/workflows/ci.yml      CI on every pull request (see below)

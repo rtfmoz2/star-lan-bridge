@@ -99,7 +99,7 @@ With no config file the bridge serves this one printer on all of the device's
 addresses. For a second printer, see [§7](#7-several-printers). To join Wi-Fi networks and see the
 addresses from a browser, see [ADMIN.md](ADMIN.md).
 
-## 5. Optional: CUPS for laptops and phones
+## 5. Optional: CUPS for printing from the device
 
 Download **Star CUPS Driver for Linux** (V3.16.0 used here) from Star's
 [TSP100III support page](https://starmicronics.com/support/products/tsp100iii-support-page/).
@@ -113,13 +113,9 @@ echo "Hello" | lp -d TSP143
 
 The script builds the driver from Star's bundled source (the binary in the
 archive is x86_64), masks `colord` (see [TROUBLESHOOTING.md](TROUBLESHOOTING.md)),
-shares the queue over IPP/AirPrint and points it at the bridge.
-
-Adding the printer on clients:
-
-* **macOS and iOS:** it appears as a Bonjour printer. If macOS asks for a driver,
-  choose *Generic PostScript Printer*.
-* **Windows:** add it by URL as `http://<pi-ip>:631/printers/TSP143` with a generic PostScript driver.
+and points the queue at the bridge. The queue is for printing from the device
+itself (`lp`, scripts): CUPS isn't shared, so it doesn't offer AirPrint or IPP
+to laptops and phones, and the firewall keeps port 631 closed.
 
 ## 6. Point the POS at it
 
@@ -183,7 +179,7 @@ Steps:
    # device
    sudo systemctl restart star-lan-bridge
    journalctl -u star-lan-bridge -n 10 -o cat     # one "listening on" line per printer
-   sudo lpadmin -p TSP143-2 -E -v socket://127.0.0.2:9100 -m star/tsp143.ppd -o printer-is-shared=true
+   sudo lpadmin -p TSP143-2 -E -v socket://127.0.0.2:9100 -m star/tsp143.ppd -o printer-is-shared=false
    ```
 
 5. **Check from another machine.** A broadcast gets one reply per printer:

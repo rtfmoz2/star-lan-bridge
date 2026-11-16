@@ -43,6 +43,10 @@ Second printers on routers that ignore DHCP client IDs.
   printer that moved address; the phone-hotspot
   fallback in ADMIN.md; how the mock printer works (docs/MOCK.md); the config
   file, setting by setting (docs/CONFIG.md).
+* **No AirPrint/IPP:** `scripts/setup-cups.sh` now sets CUPS up local only,
+  with no printer sharing and no remote access, matching what `harden.sh`
+  already enforced. The CUPS queue is for printing from the device itself;
+  laptops and phones no longer get AirPrint or IPP from it.
 * **Docs website:** README, CHANGELOG and docs/ are published to GitHub Pages
   with MkDocs (Material theme), at https://rtfmoz2.github.io/star-lan-bridge/.
   Pull requests build the site and fail on broken links.

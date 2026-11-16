@@ -11,8 +11,9 @@
 # 3. builds Star's CUPS driver from the source inside Star's archive and
 #    installs the rastertostar filters and PPDs (the download needs a Star
 #    account: https://starmicronics.com/support/products/tsp100iii-support-page/)
-# 4. turns on printer sharing and the web interface
-# 5. creates a shared queue on socket://127.0.0.1:9100 (the bridge), 72 mm paper
+# 4. keeps CUPS local: no printer sharing (AirPrint/IPP) and no remote access,
+#    so only this device prints through it
+# 5. creates a queue on socket://127.0.0.1:9100 (the bridge), 72 mm paper
 #
 # Run install.sh afterwards (or before; order doesn't matter).
 set -euo pipefail
@@ -51,14 +52,14 @@ install -m 755 "$SRC_DIR"/install/rastertostar* /usr/lib/cups/filter/
 install -d /usr/share/cups/model/star
 install -m 644 "$SRC_DIR"/install/*.ppd /usr/share/cups/model/star/
 
-echo "== CUPS sharing"
-systemctl enable --now cups avahi-daemon
-cupsctl --share-printers --remote-any --remote-admin WebInterface=yes
+echo "== CUPS (local only: no AirPrint/IPP sharing, no remote access)"
+systemctl enable --now cups
+cupsctl --no-share-printers --no-remote-any --no-remote-admin
 systemctl restart cups
 
 echo "== queue $QUEUE"
 # CUPS warns "Printer drivers are deprecated"; Star's PPD still works on CUPS 2.4.
 lpadmin -p "$QUEUE" -E -v socket://127.0.0.1:9100 -m star/tsp143.ppd \
-    -D "Star TSP143IIIBI (Bluetooth)" -o printer-is-shared=true -o PageSize=X72MMY200MM
+    -D "Star TSP143IIIBI (Bluetooth)" -o printer-is-shared=false -o PageSize=X72MMY200MM
 lpadmin -d "$QUEUE"
 lpstat -v "$QUEUE"
