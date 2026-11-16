@@ -90,7 +90,7 @@
   <text class="ink" x="478" y="345" font-size="13">Status polling</text>
 
   <!-- Bluetooth links -->
-  <text class="bt" x="730" y="140" text-anchor="middle" font-size="12" font-weight="700" letter-spacing="0.5">BLUETOOTH SPP</text>
+  <text class="muted" x="730" y="62" text-anchor="middle" font-size="12" font-weight="600" letter-spacing="0.5">BLUETOOTH</text>
   <text class="bt mono" x="730" y="196" text-anchor="middle" font-size="11">rfcomm0</text>
   <path class="btw" d="M672 206 L 788 206" marker-start="url(#b)" marker-end="url(#b)"/>
   <text class="bt mono" x="730" y="302" text-anchor="middle" font-size="11">rfcomm1</text>
