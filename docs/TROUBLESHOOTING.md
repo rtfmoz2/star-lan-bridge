@@ -209,7 +209,7 @@ this happens.
 ## Phones can't connect to the printer directly any more
 
 That's expected: the printer accepts one Bluetooth connection and the bridge
-holds it. Print through the device instead, over IPP/AirPrint or Star LAN.
+holds it. Print through the device instead, as a Star LAN printer.
 
 ## Pairing says "Paired: yes" and then "Paired: no"
 

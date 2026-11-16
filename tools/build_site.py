@@ -8,6 +8,7 @@ folder and fixes the links so they work on the site:
 
   * README.md becomes index.md; its docs/X.md links become X.md
   * links between pages stay as they are (MkDocs turns X.md into X/)
+  * images in docs/images/ are copied to images/ on the site
   * links to anything else in the repository (the example config, scripts,
     LICENSE) point at the file on GitHub instead
 
@@ -40,12 +41,16 @@ def fix_link(target: str, source: str) -> str:
     anchor = f"#{hashpart}" if hashpart else ""
     if repo_path in PAGES:
         return PAGES[repo_path] + anchor
+    if repo_path.startswith("docs/images/"):
+        return repo_path[len("docs/"):]
     return GITHUB + repo_path + anchor
 
 
 def main() -> None:
     shutil.rmtree(OUT, ignore_errors=True)
     OUT.mkdir()
+    if (ROOT / "docs" / "images").is_dir():
+        shutil.copytree(ROOT / "docs" / "images", OUT / "images")
     for source, page in PAGES.items():
         text = (ROOT / source).read_text(encoding="utf-8")
         text = LINK.sub(lambda m: f"]({fix_link(m.group(1), source)})", text)
