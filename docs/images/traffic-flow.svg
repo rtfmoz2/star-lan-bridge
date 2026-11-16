@@ -56,14 +56,10 @@
   <text class="muted" x="122" y="236" text-anchor="middle" font-size="12.5">finds and prints to</text>
   <text class="muted" x="122" y="253" text-anchor="middle" font-size="12.5">Star LAN printers</text>
   <text class="muted" x="275" y="62" text-anchor="middle" font-size="12" font-weight="600" letter-spacing="0.5">WI-FI / LAN</text>
-  <path class="wire" d="M220 214 C 268 214, 290 130, 352 130" marker-end="url(#a)"/>
-  <path class="wire" d="M220 222 C 268 222, 290 206, 352 206" marker-end="url(#a)"/>
-  <path class="wire" d="M220 230 C 268 230, 290 312, 352 312" marker-end="url(#a)"/>
 
   <!-- The device: one star-lan-bridge service for every printer -->
   <rect class="dev" x="330" y="34" width="340" height="354" rx="16"/>
-  <text class="ink" x="500" y="64" text-anchor="middle" font-size="18" font-weight="700">Raspberry Pi</text>
-  <text class="acc mono" x="500" y="86" text-anchor="middle" font-size="13">star-lan-bridge</text>
+  <text class="ink mono" x="500" y="78" text-anchor="middle" font-size="17" font-weight="700">star-lan-bridge</text>
 
   <!-- Discovery answers for the printers inside this box -->
   <rect class="disc" x="342" y="104" width="316" height="270" rx="13"/>
@@ -88,6 +84,11 @@
   <rect class="chip" x="364" y="325" width="272" height="30" rx="7"/>
   <text class="acc mono" x="378" y="345" font-size="13" font-weight="700">TCP 9101</text>
   <text class="ink" x="478" y="345" font-size="13">Status polling</text>
+
+  <!-- POS lines, drawn over the device box so their arrowheads show -->
+  <path class="wire" d="M220 214 C 268 214, 290 130, 353 130" marker-end="url(#a)"/>
+  <path class="wire" d="M220 222 C 268 222, 290 206, 353 206" marker-end="url(#a)"/>
+  <path class="wire" d="M220 230 C 268 230, 290 312, 353 312" marker-end="url(#a)"/>
 
   <!-- Bluetooth links -->
   <text class="muted" x="730" y="62" text-anchor="middle" font-size="12" font-weight="600" letter-spacing="0.5">BLUETOOTH</text>
