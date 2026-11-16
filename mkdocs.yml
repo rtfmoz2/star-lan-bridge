@@ -1,0 +1,54 @@
+# SPDX-License-Identifier: MIT
+# The docs site (GitHub Pages). Build it with:
+#   python3 tools/build_site.py && mkdocs build --strict
+# tools/build_site.py gathers README.md, CHANGELOG.md and docs/ into site-src/.
+site_name: star-lan-bridge
+site_description: A Bluetooth Star receipt printer that looks like a Star LAN printer
+site_url: https://rtfmoz2.github.io/star-lan-bridge/
+repo_url: https://github.com/rtfmoz2/star-lan-bridge
+repo_name: rtfmoz2/star-lan-bridge
+edit_uri: ""
+docs_dir: site-src
+
+nav:
+  - Home: index.md
+  - Setup: SETUP.md
+  - Config file: CONFIG.md
+  - Admin page: ADMIN.md
+  - Logs: LOGS.md
+  - Troubleshooting: TROUBLESHOOTING.md
+  - Testing: TESTING.md
+  - Mock printer: MOCK.md
+  - Protocol: PROTOCOL.md
+  - Changelog: CHANGELOG.md
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - search.highlight
+    - content.code.copy
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Light mode
+
+markdown_extensions:
+  - tables
+  - admonition
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+
+validation:
+  links:
+    anchors: warn
