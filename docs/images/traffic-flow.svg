@@ -1,10 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1030 400" width="1030" height="400" role="img" aria-labelledby="t d">
   <title id="t">How print traffic flows through star-lan-bridge</title>
-  <desc id="d">A POS app on Wi-Fi talks to the device running one star-lan-bridge service. One Star discovery listener on UDP 22222 answers for every printer. Each printer has its own IP address on the network, with TCP 9100 for printing with live status and TCP 9101 for status polling. The device relays each printer's jobs over its own Bluetooth SPP link (rfcomm0, rfcomm1) to a Bluetooth-only Star TSP100III, and passes the printer's status back.</desc>
+  <desc id="d">A POS app on Wi-Fi talks to the device running one star-lan-bridge service. One Star discovery listener on UDP 22222 answers for the printers, from the bridge itself. Each printer has its own IP address on the network, with TCP 9100 for printing with live status and TCP 9101 for status polling. The device relays each printer's jobs over its own Bluetooth SPP link (rfcomm0, rfcomm1) to a Bluetooth-only Star TSP100III, and passes the printer's status back.</desc>
   <style>
     .card { fill: #f8fafc; stroke: #e2e8f0; }
     .box { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1.5; }
     .dev { fill: #eff6ff; stroke: #2563eb; stroke-width: 2; }
+    .disc { fill: #ccfbf1; stroke: #2dd4bf; stroke-width: 1.4; }
+    .dacc { fill: #0f766e; }
     .grp { fill: #dbeafe; stroke: #93c5fd; stroke-width: 1.2; }
     .chip { fill: #ffffff; stroke: #bfdbfe; stroke-width: 1.2; }
     .ink { fill: #0f172a; }
@@ -24,6 +26,8 @@
       .card { fill: #0f172a; stroke: #1e293b; }
       .box { fill: #1e293b; stroke: #334155; }
       .dev { fill: #172554; stroke: #60a5fa; }
+      .disc { fill: #134e4a; stroke: #14b8a6; }
+      .dacc { fill: #5eead4; }
       .grp { fill: #1e3a8a; stroke: #3b82f6; }
       .chip { fill: #0f172a; stroke: #1e40af; }
       .ink { fill: #e2e8f0; }
@@ -52,36 +56,38 @@
   <text class="muted" x="122" y="236" text-anchor="middle" font-size="12.5">finds and prints to</text>
   <text class="muted" x="122" y="253" text-anchor="middle" font-size="12.5">Star LAN printers</text>
   <text class="muted" x="275" y="62" text-anchor="middle" font-size="12" font-weight="600" letter-spacing="0.5">WI-FI / LAN</text>
-  <path class="wire" d="M220 214 C 268 214, 290 120, 348 120" marker-end="url(#a)"/>
-  <path class="wire" d="M220 222 C 268 222, 290 206, 348 206" marker-end="url(#a)"/>
-  <path class="wire" d="M220 230 C 268 230, 290 312, 348 312" marker-end="url(#a)"/>
+  <path class="wire" d="M220 214 C 268 214, 290 130, 352 130" marker-end="url(#a)"/>
+  <path class="wire" d="M220 222 C 268 222, 290 206, 352 206" marker-end="url(#a)"/>
+  <path class="wire" d="M220 230 C 268 230, 290 312, 352 312" marker-end="url(#a)"/>
 
   <!-- The device: one star-lan-bridge service for every printer -->
-  <rect class="dev" x="330" y="22" width="340" height="356" rx="16"/>
-  <text class="ink" x="500" y="54" text-anchor="middle" font-size="18" font-weight="700">Raspberry Pi</text>
-  <text class="acc mono" x="500" y="76" text-anchor="middle" font-size="13">star-lan-bridge (one service)</text>
+  <rect class="dev" x="330" y="34" width="340" height="354" rx="16"/>
+  <text class="ink" x="500" y="64" text-anchor="middle" font-size="18" font-weight="700">Raspberry Pi</text>
+  <text class="acc mono" x="500" y="86" text-anchor="middle" font-size="13">star-lan-bridge</text>
 
-  <rect class="chip" x="350" y="98" width="300" height="44" rx="9"/>
-  <text class="acc mono" x="366" y="125" font-size="13.5" font-weight="700">UDP 22222</text>
-  <text class="ink" x="474" y="125" font-size="13.5">Discovery, all printers</text>
+  <!-- Discovery answers for the printers inside this box -->
+  <rect class="disc" x="342" y="104" width="316" height="270" rx="13"/>
+  <rect class="chip" x="354" y="115" width="292" height="30" rx="7"/>
+  <text class="dacc mono" x="368" y="135" font-size="13" font-weight="700">UDP 22222</text>
+  <text class="ink" x="478" y="135" font-size="13">Discovery</text>
 
-  <rect class="grp" x="350" y="156" width="300" height="100" rx="11"/>
-  <text class="acc" x="364" y="175" font-size="11" font-weight="700" letter-spacing="0.6">PRINTER 1 · IP ADDRESS</text>
-  <rect class="chip" x="360" y="184" width="280" height="30" rx="7"/>
-  <text class="acc mono" x="374" y="204" font-size="13" font-weight="700">TCP 9100</text>
-  <text class="ink" x="474" y="204" font-size="13">Print + live status</text>
-  <rect class="chip" x="360" y="219" width="280" height="30" rx="7"/>
-  <text class="acc mono" x="374" y="239" font-size="13" font-weight="700">TCP 9101</text>
-  <text class="ink" x="474" y="239" font-size="13">Status polling</text>
+  <rect class="grp" x="354" y="156" width="292" height="100" rx="11"/>
+  <text class="acc" x="368" y="175" font-size="11" font-weight="700" letter-spacing="0.6">PRINTER 1 · IP ADDRESS</text>
+  <rect class="chip" x="364" y="184" width="272" height="30" rx="7"/>
+  <text class="acc mono" x="378" y="204" font-size="13" font-weight="700">TCP 9100</text>
+  <text class="ink" x="478" y="204" font-size="13">Print + live status</text>
+  <rect class="chip" x="364" y="219" width="272" height="30" rx="7"/>
+  <text class="acc mono" x="378" y="239" font-size="13" font-weight="700">TCP 9101</text>
+  <text class="ink" x="478" y="239" font-size="13">Status polling</text>
 
-  <rect class="grp" x="350" y="262" width="300" height="100" rx="11"/>
-  <text class="acc" x="364" y="281" font-size="11" font-weight="700" letter-spacing="0.6">PRINTER 2 · IP ADDRESS</text>
-  <rect class="chip" x="360" y="290" width="280" height="30" rx="7"/>
-  <text class="acc mono" x="374" y="310" font-size="13" font-weight="700">TCP 9100</text>
-  <text class="ink" x="474" y="310" font-size="13">Print + live status</text>
-  <rect class="chip" x="360" y="325" width="280" height="30" rx="7"/>
-  <text class="acc mono" x="374" y="345" font-size="13" font-weight="700">TCP 9101</text>
-  <text class="ink" x="474" y="345" font-size="13">Status polling</text>
+  <rect class="grp" x="354" y="262" width="292" height="100" rx="11"/>
+  <text class="acc" x="368" y="281" font-size="11" font-weight="700" letter-spacing="0.6">PRINTER 2 · IP ADDRESS</text>
+  <rect class="chip" x="364" y="290" width="272" height="30" rx="7"/>
+  <text class="acc mono" x="378" y="310" font-size="13" font-weight="700">TCP 9100</text>
+  <text class="ink" x="478" y="310" font-size="13">Print + live status</text>
+  <rect class="chip" x="364" y="325" width="272" height="30" rx="7"/>
+  <text class="acc mono" x="378" y="345" font-size="13" font-weight="700">TCP 9101</text>
+  <text class="ink" x="478" y="345" font-size="13">Status polling</text>
 
   <!-- Bluetooth links -->
   <text class="bt" x="730" y="140" text-anchor="middle" font-size="12" font-weight="700" letter-spacing="0.5">BLUETOOTH SPP</text>
