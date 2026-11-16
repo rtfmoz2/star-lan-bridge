@@ -85,10 +85,10 @@
   <text class="acc mono" x="378" y="345" font-size="13" font-weight="700">TCP 9101</text>
   <text class="ink" x="478" y="345" font-size="13">Status polling</text>
 
-  <!-- POS lines, drawn over the device box so their arrowheads show -->
-  <path class="wire" d="M220 214 C 268 214, 290 130, 353 130" marker-end="url(#a)"/>
-  <path class="wire" d="M220 222 C 268 222, 290 206, 353 206" marker-end="url(#a)"/>
-  <path class="wire" d="M220 230 C 268 230, 290 312, 353 312" marker-end="url(#a)"/>
+  <!-- POS lines, ending at the edge of the device box -->
+  <path class="wire" d="M220 214 C 262 214, 282 130, 329 130" marker-end="url(#a)"/>
+  <path class="wire" d="M220 222 C 262 222, 282 206, 329 206" marker-end="url(#a)"/>
+  <path class="wire" d="M220 230 C 262 230, 282 312, 329 312" marker-end="url(#a)"/>
 
   <!-- Bluetooth links -->
   <text class="muted" x="730" y="62" text-anchor="middle" font-size="12" font-weight="600" letter-spacing="0.5">BLUETOOTH</text>
