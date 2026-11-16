@@ -1,0 +1,52 @@
+# SPDX-License-Identifier: MIT
+# The docs site: README, CHANGELOG and docs/ built with MkDocs (mkdocs.yml).
+# Pull requests only build it, so broken links fail the check; pushes to main
+# also publish it to GitHub Pages.
+name: Docs site
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install MkDocs
+        run: pip install -r requirements-docs.txt
+      - name: Build (broken links fail the build)
+        run: |
+          python3 tools/build_site.py
+          mkdocs build --strict
+      - uses: actions/upload-pages-artifact@v3
+        if: github.event_name != 'pull_request'
+        with:
+          path: site
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

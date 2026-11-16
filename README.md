@@ -109,6 +109,8 @@ and give each printer its own address; see [SETUP.md §7](docs/SETUP.md#7-severa
 
 ## Documentation
 
+The docs are also published as a website: <https://rtfmoz2.github.io/star-lan-bridge/>.
+
 * **[docs/SETUP.md](docs/SETUP.md)**: full setup, from flashing the device to
   pairing, the bridge, the optional CUPS queue, POS configuration and
   adding more printers
@@ -150,7 +152,9 @@ scripts/setup-cups.sh         optional: CUPS + Star driver build + shared queue
 scripts/uninstall.sh
 tests/                        unit tests: python3 -m unittest discover tests
 .github/workflows/ci.yml      CI on every pull request (see below)
+.github/workflows/pages.yml   builds the docs site; publishes it from main
 docs/                         setup, protocol and troubleshooting docs
+mkdocs.yml                    the docs site (MkDocs); tools/build_site.py gathers its pages
 ```
 
 ## Tests and CI
@@ -168,6 +172,15 @@ pull request and on pushes to `main`:
   waits on slow shared runners.
 * **lint:** `shellcheck` on every script, `nft -c` on the firewall ruleset, and
   `systemd-analyze verify` on the unit files.
+
+A second workflow ([.github/workflows/pages.yml](.github/workflows/pages.yml))
+builds the docs site with MkDocs and fails on broken links. On `main` it also
+publishes the site to GitHub Pages. To build it locally:
+
+```bash
+pip install -r requirements-docs.txt
+python3 tools/build_site.py && mkdocs serve
+```
 
 CI can't exercise Bluetooth, real printers, the POS or Wi-Fi. Those still need
 checking on a device (see [docs/SETUP.md](docs/SETUP.md)).

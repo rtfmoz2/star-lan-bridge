@@ -43,6 +43,9 @@ Second printers on routers that ignore DHCP client IDs.
   printer that moved address; the phone-hotspot
   fallback in ADMIN.md; how the mock printer works (docs/MOCK.md); the config
   file, setting by setting (docs/CONFIG.md).
+* **Docs website:** README, CHANGELOG and docs/ are published to GitHub Pages
+  with MkDocs (Material theme), at https://rtfmoz2.github.io/star-lan-bridge/.
+  Pull requests build the site and fail on broken links.
 * **Firewall add-ons:** the hardened firewall also loads `/etc/nftables.d/*.nft`
   after its own rules, so add-ons (e.g. a VPN for remote SSH) can extend it,
   and running `scripts/harden.sh` again no longer wipes them. harden.sh creates
